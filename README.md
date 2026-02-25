@@ -34,12 +34,26 @@ The columns of the data files are:
 
 Contains eye-tracking data for the second experiment; file names follow the format `{participant_id}_{eye}.csv`.
 
+The columns of the data files are:
+
 * `timestamp_sec`: Timestamp in seconds.
 * `{x|y}_dva`: Gaze relative to the head (Fick's angles).
 * `pupil_diameter_mm`: Pupil diameter in millimeters.
 * `stimulus_{x|y}_deg`: Stimulus position in degrees, relative to the monitor center.
 * `luminance`: monitor luminance level, either 'bright' or 'dark'.
 * `fixation_id`: Unique identifier for each fixation detected by I-VT.
+
+### Vergence Experiment Data (`Data/3_vergence/`)   
+
+Contains eye-tracking data for the third experiment; file names follow the format `{participant_id}_{trial_id}.csv`.
+The data is for both eyes, in the marker coordinate system: the origin is the marker center, X goes right, Y down, Z away from the participant, the units are millimeters.
+The columns of the data files are:
+
+* `timestamp_sec`: Timestamp in seconds.
+* `ic{X|Y|Z}_{left|right}`: limbus center position, in millimeters, relative to the maker center.
+* `ig{X|Y|Z}_{left|right}`: gaze vector relative to the maker center. By convention, the gaze vector points _into_ the eye.
+* `stimulus_order_from_viewers`: stimulus order from the participant's perspective (1: closest, 6: farthest).
+* `reference_fixation_id`: if not empty, this row is part of the fixation that was used as a reference period for the vergence measurement for the stimulus in that position. 
 
 ## Code
 
