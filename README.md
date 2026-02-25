@@ -32,6 +32,14 @@ The columns of the data files are:
 
 ### Luminance Experiment Data (`Data/2_luminance/`)   
 
+Contains eye-tracking data for the second experiment; file names follow the format `{participant_id}_{eye}.csv`.
+
+* `timestamp_sec`: Timestamp in seconds.
+* `{x|y}_dva`: Gaze relative to the head (Fick's angles).
+* `pupil_diameter_mm`: Pupil diameter in millimeters.
+* `stimulus_{x|y}_deg`: Stimulus position in degrees, relative to the monitor center.
+* `luminance`: monitor luminance level, either 'bright' or 'dark'.
+* `fixation_id`: Unique identifier for each fixation detected by I-VT.
 
 ## Code
 
