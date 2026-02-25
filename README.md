@@ -13,24 +13,25 @@ The paper is currently in review, and the details will be updated here if and wh
 
 ## Repository Structure
 The repository is structured as follows:
-* `data/` contains the raw eye-tracking data from the experiments  
-* `analysis/` contains the statistical analysis code in Python
+* `Data/` contains the raw eye-tracking data from the experiments  
+* `Code/` contains the statistical analysis and plotting code in Python
 
 ## Data
 
-Each experiment directory contains one participant directory for each participant in the experiment.
-
 ### Accuracy Experiment Data (`Data/1_accuracy/`)   
 
-Each participant directory contains eye-tracking data for each eye of each trial `{participant_id}_{trial_id}_{eye}.csv`.
+Contains eye-tracking data for the first experiment; file names follow the format `{participant_id}_{trial_id}_{eye}.csv`.
 
 The columns of the data files are:
 * `timestamp_sec`: Timestamp in seconds.
 * `deviation_from_stimulus_{x|y}_dva`: Deviation of the eye position from the stimulus position in degrees of visual angle (dva).
 * `stimulus_{x|y}_deg`: Stimulus position in degrees, relative to the monitor center.
 * `kappa_{x|y}_deg`: visual-to-optical axis correction in degrees – constant for each eye.
-* `is_fixation_outlier`: True if this fixation was considered an outlier.
-* `participant_in_training_set`: True if this participant was in the training set - constant for participant.
+* `is_fixation_outlier`: True if this fixation was considered an outlier – constant for this stimulus coordinate.
+* `participant_in_training_set`: True if this participant was in the training set – constant for this participant.
+
+### Luminance Experiment Data (`Data/2_luminance/`)   
+
 
 ## Code
 
