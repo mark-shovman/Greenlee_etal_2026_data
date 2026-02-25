@@ -57,6 +57,18 @@ The columns of the data files are:
 
 ## Code
 
+The `Code/` directory contains Python scripts for analyzing the eye-tracking data from all three experiments:
+
+### Analysis Scripts
+
+* `analyse_accuracy.py`: Analyzes data from the accuracy experiment (`Data/1_accuracy/`). 
+* `analyse_luminance.py`: Analyzes data from the luminance experiment (`Data/2_luminance/`).
+* `analyse_vergence.py`: Analyzes data from the vergence experiment (`Data/3_vergence/`).
+* `utils.py`: Contains utility functions used across analysis scripts.
+
+### Dependencies
+
+* `requirements.txt`: Lists all Python package dependencies required to run the analysis code.
 
 ## Citation
 TBD
