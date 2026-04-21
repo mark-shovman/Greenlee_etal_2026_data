@@ -59,8 +59,6 @@ def collate_series(s, min_duration=0):
     NB t_start and t_end are set mid-way between index values
         except for the beginning of the first interval and the end of the last one which are set on the index value
 
-    TODO: separate min_duration for each label (e.g. using dict of {label: min_label_duration})
-
     """
 
     intervals = []

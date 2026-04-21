@@ -1,5 +1,5 @@
 """
-Figures 8 abd 9 in the paper
+Figures 8 and 9 in the paper
 """
 
 import os
