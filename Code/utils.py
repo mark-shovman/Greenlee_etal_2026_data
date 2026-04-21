@@ -44,3 +44,52 @@ def calculate_eu_percentiles(
     )
     up.rename(columns={"level_1": "U_percentile"}, inplace=True)
     return up.pivot(index="U_percentile", columns="E_percentile", values=data_col)
+
+def collate_series(s, min_duration=0):
+    """
+    Collates a series of discrete values into a list of continuous intervals
+
+    Parameters:
+    - s: a series of discrete values to be collated
+    - min_duration: the minimum duration for each interval
+
+    Returns:
+    - list of tuples (t_start, t_end, value);
+
+    NB t_start and t_end are set mid-way between index values
+        except for the beginning of the first interval and the end of the last one which are set on the index value
+
+    TODO: separate min_duration for each label (e.g. using dict of {label: min_label_duration})
+
+    """
+
+    intervals = []
+    t_start = s.index[0]
+    current_value = s.iloc[0]
+
+    for i in range(1, len(s)):
+        if s.iloc[i] != current_value:
+            t_end = (s.index[i - 1] + s.index[i]) / 2
+            if t_end - t_start >= min_duration:
+                intervals.append([t_start, t_end, current_value])
+                t_start = t_end
+                current_value = s.iloc[i]
+            else:
+                if intervals:
+                    if intervals[-1][2] == s.iloc[i]:
+                        t_start = intervals[-1][0]
+                        current_value = intervals[-1][2]
+                        del intervals[-1]
+                    else:
+                        intervals[-1][1] = t_end
+                        t_start = t_end
+                        current_value = s.iloc[i]
+
+    # Add the last stretch
+    if s.index[-1] - t_start >= min_duration:
+        intervals.append([t_start, s.index[-1], current_value])
+    elif intervals:
+        # Extend the previous stretch to the end
+        intervals[-1][1] = s.index[-1]
+
+    return intervals
