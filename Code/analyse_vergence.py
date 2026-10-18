@@ -249,14 +249,19 @@ def fig15(results):
     save_figure(fig, "fig15_decoding_confusion")
 
 
+def prepare():
+    """The data and the per-stimulus vergence: (stimuli with vergence, fixations, raw, clean)."""
+    stimuli, fixations, raw = load()
+    clean = {k: blank(v) for k, v in raw.items()}
+    return stimulus_vergence(reference_fixations(stimuli, fixations), clean), fixations, raw, clean
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--show", action="store_true", help="Show the figures as well as saving them")
     args = p.parse_args()
 
-    stimuli, fixations, raw = load()
-    clean = {k: blank(v) for k, v in raw.items()}
-    s = stimulus_vergence(reference_fixations(stimuli, fixations), clean)
+    s, fixations, raw, clean = prepare()
 
     runs = s.groupby("participant").recording.nunique().value_counts().sort_index()
     valid = s[s.vergence_distance.notna()]

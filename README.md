@@ -20,11 +20,14 @@ text differs from what the data give.
 │   ├── analyse_accuracy.py    # Grid fixation: Figs 4-9, Table 1
 │   ├── analyse_luminance.py   # Background luminance change: Figs 10-12
 │   ├── analyse_vergence.py    # Visual search: Figs 13-15
+│   ├── participant_table.py   # Per-participant supplementary table
 │   └── utils.py
 ├── Data/
 │   ├── 1_accuracy/
 │   ├── 2_luminance/
-│   └── 3_vergence/
+│   ├── 3_vergence/
+│   └── participants.csv    # Age group, sex, refraction
+├── Tables/                 # Per-participant table (participants.csv, participants.md)
 ├── LICENSE
 ├── README.md
 └── requirements.txt        # Python dependencies
@@ -45,6 +48,23 @@ text differs from what the data give.
    python Code/analyse_vergence.py
    ```
 
+## Per-participant table
+
+`Tables/participants.csv` (full precision) and `Tables/participants.md` (rounded) give one row per
+participant; `python Code/participant_table.py` regenerates both. Cells are empty where a
+participant did not take part in that experiment.
+
+* `in_training_set`: other recordings of this participant were in the limbus model's training set
+* `age_group` (decade), `sex`, `refraction_{left|right}_D`: from `Data/participants.csv`; refraction is empty where it was not recorded
+* `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks
+* `n_fixations`, `n_fixations_valid`: all fixations, and those not rejected as outliers
+* `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
+* `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 8–9; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
+* `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
+* `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
+* `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 15)
+* `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable
+
 ## Data
 
 Participants are identified by pseudonymous IDs (`p000`, `p001`, ...), consistent across the three
@@ -54,6 +74,12 @@ experiments. Recordings of one participant in one experiment are numbered in tim
 The data come from the limbus model and processing described in the paper. Intervals the analyses
 depend on - stimulus presentations, detected eye-movement events, fixations - are given as tables
 with exact start and end times, so the scripts reproduce the reported numbers exactly.
+
+### Participants (`Data/participants.csv`)
+
+One row per participant (58): `participant`, `age_group` (decade, e.g. `20-29`), `sex` (`F`/`M`),
+`refraction_left_D`, `refraction_right_D` (refractive correction in dioptres). Refraction was
+recorded for 18 participants and is empty for the others.
 
 ### Grid fixation (`Data/1_accuracy/`)
 
