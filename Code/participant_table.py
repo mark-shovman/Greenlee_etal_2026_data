@@ -39,12 +39,12 @@ def boot_ci(values, weights, rng):
 
 def grid_columns():
     df = pd.read_csv(data_path("1_accuracy", "fixations.csv"))
-    edata = df[df.is_fixation_outlier == 0]
+    edata = df[df.is_fixation_valid == 1]
     out = pd.DataFrame(index=pd.Index(sorted(df.participant.unique()), name="participant"))
     out["in_training_set"] = df.groupby("participant").participant_in_training_set.first()
 
-    kappa = df.groupby(["participant", "eye", "recording", "grid"])[["kappa_x_deg", "kappa_y_deg"]].first()
-    kappa = kappa.groupby(["participant", "eye"]).median().unstack("eye")
+    blocks = kappa_blocks(df)
+    kappa = blocks.groupby(["participant", "eye"])[["kappa_x_deg", "kappa_y_deg"]].median().unstack("eye")
     for eye in ("left", "right"):
         for ax in ("x", "y"):
             out[f"kappa_{eye}_{ax}_deg"] = kappa[(f"kappa_{ax}_deg", eye)]
@@ -70,7 +70,17 @@ def grid_columns():
     for col in ("n_fixations_valid", "n_accuracy_whole", "n_accuracy_central",
                 "n_precision_whole", "n_precision_central"):
         out[col] = out[col].fillna(0).astype(int)
-    return out, ue50, len(edata)
+    return out, ue50, len(edata), blocks
+
+
+def kappa_blocks(df):
+    """Kappa per grid block: the median offset over the block's valid fixations, as reported. The
+    accuracy numbers use the per-half kappa instead (kappa_x_deg), fitted on the other half."""
+    g = df.groupby(["participant", "eye", "recording", "grid"])
+    out = g[["kappa_grid_x_deg", "kappa_grid_y_deg"]].first().rename(
+        columns={"kappa_grid_x_deg": "kappa_x_deg", "kappa_grid_y_deg": "kappa_y_deg"})
+    out["n_fixations_valid"] = g.is_fixation_valid.sum().astype(int)
+    return out.reset_index()
 
 
 # ---------------------------------------------------------------------------- luminance
@@ -170,8 +180,18 @@ def markdown(t):
     return "\n".join(lines) + "\n"
 
 
+def blocks_markdown(b):
+    """The per-block kappa table, kappa to 2 dp."""
+    lines = ["| Participant | Eye | Recording | Grid | Kappa x (°) | Kappa y (°) | Fixations valid |",
+             "|---|---|---|---|---|---|---|"]
+    for _, r in b.iterrows():
+        lines.append(f"| {r.participant} | {r.eye} | {r.recording} | {r.grid} | {fmt(r.kappa_x_deg, 2)} | "
+                     f"{fmt(r.kappa_y_deg, 2)} | {r.n_fixations_valid} |")
+    return "\n".join(lines) + "\n"
+
+
 def main():
-    grid, ue50, n_valid = grid_columns()
+    grid, ue50, n_valid, blocks = grid_columns()
     luminance, n_episode_eyes = luminance_columns()
     vergence, pairs, valid = vergence_columns()
 
@@ -197,6 +217,9 @@ def main():
     t.to_csv(os.path.join(TABLES, "participants.csv"))
     with open(os.path.join(TABLES, "participants.md"), "w", encoding="utf-8") as f:
         f.write(markdown(t))
+    blocks.to_csv(os.path.join(TABLES, "kappa_blocks.csv"), index=False)
+    with open(os.path.join(TABLES, "kappa_blocks.md"), "w", encoding="utf-8") as f:
+        f.write(blocks_markdown(blocks))
     print(f"Wrote {TABLES}")
 
 

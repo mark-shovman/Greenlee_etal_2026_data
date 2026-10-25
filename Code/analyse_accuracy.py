@@ -16,6 +16,7 @@ from utils import (data_path, inverse_weights, pooled_median, save_figure, ue_pe
 
 CELL = 3.0  # FOV cell size [deg]; cells are centred on 0
 MIN_IN_CELL = 5  # small-stratum safeguard of the inverse-density weighting
+MIN_SAMPLE_FRAC = 0.3  # the validity threshold the data were exported with (is_fixation_valid)
 CENTRAL = (15, 15)  # central window [deg], tiles exactly at CELL
 PCTS = [10, 25, 50, 75, 90]
 METRICS = {"accuracy_centroid_deg": ("Accuracy", 1.0), "precision_rms_s2s_deg": ("Precision (RMS-S2S)", 0.2)}
@@ -48,7 +49,10 @@ def print_counts(df):
           f"{(per == '5x5').sum()} on the 5x5 grid, {(per == '7x11').sum()} on the 7x11 grid; "
           f"{df.groupby('participant').participant_in_training_set.first().sum()} participants "
           f"had other sessions in the model's training set")
-    print(f"{df.is_fixation_outlier.sum()} outlier fixations")
+    low = {c: (df[c] < MIN_SAMPLE_FRAC).sum() for c in ("frac_tracked", "frac_head", "frac_unannotated")}
+    print(f"{(df.is_fixation_valid == 0).sum()} invalid fixations, under {MIN_SAMPLE_FRAC:.0%} of the expected "
+          f"samples: {low['frac_tracked']} tracked, {low['frac_head']} with head pose, "
+          f"{low['frac_unannotated']} left after the blink annotation")
     for col, unit in (("head_movement_mm", "mm"), ("head_movement_deg", "deg")):
         print(f"Head {'motion' if unit == 'mm' else 'rotation'} per fixation: median {df[col].median():.2f} {unit}, "
               f"95th percentile {df[col].quantile(.95):.2f} {unit}")
@@ -64,7 +68,7 @@ def table1(edata, n_all):
         rows[name] = [pooled_median(edata, metric), pooled_median(whole, metric, "weight"),
                       pooled_median(central, metric, "weight")]
         print(f"\n{name}: {len(whole)} fixations in the whole-FOV weighting "
-              f"({n_all - len(whole)} of {n_all} removed: outliers and cells under {MIN_IN_CELL}), "
+              f"({n_all - len(whole)} of {n_all} removed: invalid and cells under {MIN_IN_CELL}), "
               f"{len(central)} in the central {CENTRAL[0]}x{CENTRAL[1]} deg")
         ue[metric] = {
             "unweighted": ue_percentiles(edata, "participant", metric, PCTS),
@@ -110,18 +114,22 @@ def fig4():
 
 def fig5(df):
     """Optical (top) and visual (bottom) axis per frame around each grid target, both eyes;
-    analysis-window frames without blinks, as the accuracy numbers use. Outlier targets: x."""
+    analysis-window frames without blinks, as the accuracy numbers use. Targets: filled and open
+    circles are the two checkerboard halves, each corrected with the other's kappa; x is invalid."""
     pid, rec, grid = FIG5.split("_", 1)[0], "_".join(FIG5.split("_")[1:3]), FIG5.split("_")[-1]
     fig, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True, sharey=True)
     for col, eye in enumerate(["left", "right"]):
         d = pd.read_csv(data_path("1_accuracy", f"{FIG5}_{eye}.csv"))
         d = d[d.in_analysis_window & ~d.blink]
         fx = df[(df.participant == pid) & (df.recording == rec) & (df.grid == grid) & (df.eye == eye)]
-        outliers = set(fx.fixation[fx.is_fixation_outlier == 1])
+        fx = fx.set_index("fixation")
         for num, f in d.groupby("fixation"):
             sx, sy = f.stimulus_monitor_x_deg.iloc[0], f.stimulus_monitor_y_deg.iloc[0]
             for ax in axs[:, col]:
-                ax.plot(sx, sy, "xk" if num in outliers else "ok")
+                if not fx.is_fixation_valid[num]:
+                    ax.plot(sx, sy, "xk")
+                else:
+                    ax.plot(sx, sy, "ok", markerfacecolor="k" if fx.kappa_half[num] == 0 else "none")
                 ax.annotate(num, xy=(sx, sy), xytext=(sx + 0.2, sy + 0.2))
             axs[0, col].plot(sx + f.optical_deviation_x_deg, sy + f.optical_deviation_y_deg, ".",
                              color="#ff4d00", alpha=0.3, markersize=2)
@@ -129,8 +137,11 @@ def fig5(df):
                              "o", color="#1f77b4", markersize=2)
             axs[1, col].plot(sx + f.visual_deviation_x_deg, sy + f.visual_deviation_y_deg, ".",
                              color="#2ca02c", alpha=0.3, markersize=2)
-        axs[0, col].set_title(f"{eye} eye, kappa {d.kappa_x_deg.iloc[0]:.2f} by {d.kappa_y_deg.iloc[0]:.2f} deg")
-        print(f"Fig 5 {eye} eye kappa: {d.kappa_x_deg.iloc[0]:.2f} by {d.kappa_y_deg.iloc[0]:.2f} deg")
+        kx, ky = fx.kappa_grid_x_deg.iloc[0], fx.kappa_grid_y_deg.iloc[0]
+        halves = fx.groupby("kappa_half")[["kappa_x_deg", "kappa_y_deg"]].first()
+        axs[0, col].set_title(f"{eye} eye, kappa {kx:.2f} by {ky:.2f} deg")
+        print(f"Fig 5 {eye} eye kappa: {kx:.2f} by {ky:.2f} deg; applied per half: "
+              + ", ".join(f"{h}: {r.kappa_x_deg:.2f} by {r.kappa_y_deg:.2f}" for h, r in halves.iterrows()))
     ticks = np.arange(-21, 22, 3)
     for ax in axs.flat:
         ax.set_xticks(ticks)
@@ -199,7 +210,7 @@ def main():
     args = p.parse_args()
 
     df = pd.read_csv(data_path("1_accuracy", "fixations.csv"))
-    edata = df[df.is_fixation_outlier == 0]
+    edata = df[df.is_fixation_valid == 1]
 
     print_counts(df)
     ue = table1(edata, len(df))

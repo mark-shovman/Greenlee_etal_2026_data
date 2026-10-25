@@ -27,7 +27,7 @@ text differs from what the data give.
 │   ├── 2_luminance/
 │   ├── 3_vergence/
 │   └── participants.csv    # Age group, sex, refraction
-├── Tables/                 # Per-participant table (participants.csv, participants.md)
+├── Tables/                 # Per-participant table (participants.*), kappa per grid block (kappa_blocks.*)
 ├── LICENSE
 ├── README.md
 └── requirements.txt        # Python dependencies
@@ -56,14 +56,17 @@ participant did not take part in that experiment.
 
 * `in_training_set`: other recordings of this participant were in the limbus model's training set
 * `age_group` (decade), `sex`, `refraction_{left|right}_D`: from `Data/participants.csv`; refraction is empty where it was not recorded
-* `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks
-* `n_fixations`, `n_fixations_valid`: all fixations, and those not rejected as outliers
+* `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks (`Tables/kappa_blocks.*`)
+* `n_fixations`, `n_fixations_valid`: all fixations, and the valid ones (`is_fixation_valid`)
 * `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
 * `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 8–9; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
 * `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
 * `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
 * `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 15)
 * `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable
+
+`Tables/kappa_blocks.csv` / `.md`, written by the same script, give kappa per participant, eye, recording and
+grid block (`kappa_grid_{x|y}_deg` in `fixations.csv`), with the block's number of valid fixations.
 
 ## Data
 
@@ -89,12 +92,14 @@ recorded for 18 participants and is empty for the others.
 * `t_start_sec`, `t_end_sec`, `n_samples`: the fixation period (700 ms after target onset to 100 ms before offset), and the samples in it
 * `accuracy_centroid_deg`: angle between the mean gaze direction and the mean target direction (the accuracy reported in the paper)
 * `accuracy_deg`, `accuracy_x_deg`, `accuracy_y_deg`: robust mean of the per-sample angular deviation, and its horizontal and vertical components
-* `precision_rms_s2s_deg`: RMS of the sample-to-sample angular differences (the precision reported in the paper); `precision_std_deg`: angular SD about the mean gaze direction
+* `precision_rms_s2s_deg`: RMS of the sample-to-sample angular differences between consecutive samples, at most 12.5 ms (1.5 frames) apart, so a gap left by removed frames is not counted as a step (the precision reported in the paper); `precision_std_deg`: angular SD about the mean gaze direction
 * `stimulus_head_x_deg`, `stimulus_head_y_deg`: horizontal and vertical angle from the limbus centre to the target, in the head (front-facing camera) frame; `stimulus_distance_mm`: distance from the limbus centre to the target
 * `head_movement_mm`, `head_movement_deg`: RMS deviation of the head position and orientation from their mean over the fixation
 * `stimulus_monitor_x_deg`, `stimulus_monitor_y_deg`: nominal target position on the display grid
-* `kappa_x_deg`, `kappa_y_deg`: the eye's kappa (visual-to-optical axis) correction
-* `is_fixation_outlier`: 1 if the fixation was rejected as an outlier during kappa estimation
+* `kappa_x_deg`, `kappa_y_deg`: the kappa (visual-to-optical axis) correction applied to this fixation. The grid's targets are split into two halves in a checkerboard pattern (`kappa_half`, 0 or 1), and each half is corrected with the kappa fitted on the other half, so kappa is never fitted on the fixations it is scored on. Kappa is the median, over the other half's valid fixations, of each fixation's mean horizontal and vertical gaze deviation from the target
+* `kappa_grid_x_deg`, `kappa_grid_y_deg`: the same median over all valid fixations of the grid block; reported, not applied
+* `frac_tracked`, `frac_head`, `frac_unannotated`: share of the expected samples (fixation period × 120 Hz eye camera, × 30 Hz for head pose) that the tracker delivered, that had a head pose, and that were left after removing the frames annotated as blinks
+* `is_fixation_valid`: 1 if all three shares are at least 0.3. The analyses use the valid fixations; no fixation is rejected for its error
 * `participant_in_training_set`: `True` if other recordings of this participant were in the limbus model's training set
 
 **`{participant}_{recording}_{grid}_{eye}.csv`** — per-frame data for the two example recordings
@@ -105,7 +110,7 @@ recorded for 18 participants and is empty for the others.
 * `optical_deviation_{x|y}_deg`, `visual_deviation_{x|y}_deg`: angular deviation of the gaze from the target
 * `in_analysis_window`: the frame lies in the fixation period used for accuracy and precision
 * `blink`: the frame was manually marked as a blink and excluded from the accuracy analyses
-* `kappa_{x|y}_deg`
+* `kappa_{x|y}_deg`: the kappa applied to the frame's fixation (from the other checkerboard half)
 
 ### Background luminance change (`Data/2_luminance/`)
 
