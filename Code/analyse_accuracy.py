@@ -20,18 +20,11 @@ MIN_SAMPLE_FRAC = 0.3  # the validity threshold the data were exported with (is_
 CENTRAL = (15, 15)  # central window [deg], tiles exactly at CELL
 PCTS = [10, 25, 50, 75, 90]
 METRICS = {"accuracy_centroid_deg": ("Accuracy", 1.0), "precision_rms_s2s_deg": ("Precision (RMS-S2S)", 0.2)}
+TABLE1 = {**METRICS, "precision_std_deg": ("Precision (SD)", None)}  # Table 1 only; figures use METRICS
 X, Y = "stimulus_head_x_deg", "stimulus_head_y_deg"
 
-FIG4 = ("p038_grid_1_grid1", "left", range(11, 25))  # recording, eye, fixations shown
+FIG4 = ("p038_grid_1_grid1", range(11, 25))  # recording, fixations shown
 FIG5 = "p042_grid_1_grid2"
-
-
-def mad_mean(arr, threshold=3.0):
-    """Mean after dropping values beyond threshold * scaled MAD from the median."""
-    arr = np.asarray(arr)
-    median = np.median(arr)
-    scaled = np.abs(arr - median) / (np.median(np.abs(arr - median)) * 1.4826)
-    return np.mean(arr[~(scaled > threshold)])
 
 
 def cells(df, col):
@@ -62,7 +55,7 @@ def table1(edata, n_all):
     """Table 1: pooled medians, unweighted and inverse-density-weighted. Also returns the U|E
     tables behind Figs 8 and 9."""
     rows, ue = {}, {}
-    for metric, (name, _) in METRICS.items():
+    for metric, (name, _) in TABLE1.items():
         whole = inverse_weights(edata, metric, CELL, MIN_IN_CELL)
         central = inverse_weights(edata, metric, CELL, MIN_IN_CELL, CENTRAL)
         rows[name] = [pooled_median(edata, metric), pooled_median(whole, metric, "weight"),
@@ -88,24 +81,30 @@ def table1(edata, n_all):
 
 
 def fig4():
-    """Timeline of gaze (red) and stimulus (black) in the head frame, one eye, whole fixations
-    with blinks left in. Angles of the negated vectors, as in the original figure."""
-    rec, eye, fixations = FIG4
-    d = pd.read_csv(data_path("1_accuracy", f"{rec}_{eye}.csv"))
-    d = d[d.fixation.isin(fixations)]
+    """Timeline of gaze (left eye blue, right eye red) and of the stimulus as seen from each eye
+    (black: solid left, dashed right) in the head frame, whole fixations with blinks left in.
+    Angles of the negated vectors, as in the original figure."""
+    rec, fixations = FIG4
     fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
     lims = [[np.inf, -np.inf], [np.inf, -np.inf]]
-    for num, f in d.groupby("fixation"):
-        gaze = unit_to_az_el(-f[["visual_axis_x", "visual_axis_y", "visual_axis_z"]].to_numpy())
-        stim = unit_to_az_el(-f[["stimulus_dir_x", "stimulus_dir_y", "stimulus_dir_z"]].to_numpy())
-        for i, ax in enumerate(axs):
-            ax.plot(f.timestamp_sec, gaze[i], "r-")
-            ax.plot(f.timestamp_sec, stim[i], "k-")
-            ax.text(f.timestamp_sec.iloc[0], stim[i][0], num, ha="right", va="center")
-            lims[i] = [min(lims[i][0], stim[i].min()), max(lims[i][1], stim[i].max())]
+    for eye, color, style in (("left", "tab:blue", "-"), ("right", "tab:red", "--")):
+        d = pd.read_csv(data_path("1_accuracy", f"{rec}_{eye}.csv"))
+        d = d[d.fixation.isin(fixations)]
+        for num, f in d.groupby("fixation"):
+            gaze = unit_to_az_el(-f[["visual_axis_x", "visual_axis_y", "visual_axis_z"]].to_numpy())
+            stim = unit_to_az_el(-f[["stimulus_dir_x", "stimulus_dir_y", "stimulus_dir_z"]].to_numpy())
+            first = num == fixations[0]
+            for i, ax in enumerate(axs):
+                ax.plot(f.timestamp_sec, gaze[i], "-", color=color, label=f"{eye} eye gaze" if first else None)
+                ax.plot(f.timestamp_sec, stim[i], "k" + style, linewidth=1,
+                        label=f"stimulus, {eye} eye" if first else None)
+                if eye == "left":
+                    ax.text(f.timestamp_sec.iloc[0], stim[i][0], num, ha="right", va="center")
+                lims[i] = [min(lims[i][0], stim[i].min()), max(lims[i][1], stim[i].max())]
     for ax, (lo, hi) in zip(axs, lims):
         ax.set_ylim(lo - 2, hi + 2)  # blink artefacts run off the scale, as in the paper
         ax.grid(True)
+    axs[0].legend(loc="upper right", fontsize="small", ncol=2)
     axs[0].set_ylabel("Azimuth (deg)")
     axs[1].set_ylabel("Elevation (deg)")
     axs[1].set_xlabel("Time (sec)")
@@ -133,7 +132,7 @@ def fig5(df):
                 ax.annotate(num, xy=(sx, sy), xytext=(sx + 0.2, sy + 0.2))
             axs[0, col].plot(sx + f.optical_deviation_x_deg, sy + f.optical_deviation_y_deg, ".",
                              color="#ff4d00", alpha=0.3, markersize=2)
-            axs[1, col].plot(sx + mad_mean(f.visual_deviation_x_deg), sy + mad_mean(f.visual_deviation_y_deg),
+            axs[1, col].plot(sx + f.visual_deviation_x_deg.mean(), sy + f.visual_deviation_y_deg.mean(),
                              "o", color="#1f77b4", markersize=2)
             axs[1, col].plot(sx + f.visual_deviation_x_deg, sy + f.visual_deviation_y_deg, ".",
                              color="#2ca02c", alpha=0.3, markersize=2)

@@ -86,13 +86,15 @@ recorded for 18 participants and is empty for the others.
 
 ### Grid fixation (`Data/1_accuracy/`)
 
-**`fixations.csv`** — one row per fixation period and eye (8,101 rows, 58 participants).
+**`fixations.csv`** — one row per fixation period and eye (7,978 rows, 58 participants; 7,976 valid). One grid
+block is left out: `grid2` of `p038`'s `grid_2` recording, where the stimulus presentation system
+stalled repeatedly and skipped 14 of the 61 targets.
 
 * `participant`, `recording`, `grid` (grid block within the recording), `eye`, `fixation` (target number, in presentation order)
 * `t_start_sec`, `t_end_sec`, `n_samples`: the fixation period (700 ms after target onset to 100 ms before offset), and the samples in it
 * `accuracy_centroid_deg`: angle between the mean gaze direction and the mean target direction (the accuracy reported in the paper)
 * `accuracy_deg`, `accuracy_x_deg`, `accuracy_y_deg`: robust mean of the per-sample angular deviation, and its horizontal and vertical components
-* `precision_rms_s2s_deg`: RMS of the sample-to-sample angular differences between consecutive samples, at most 12.5 ms (1.5 frames) apart, so a gap left by removed frames is not counted as a step (the precision reported in the paper); `precision_std_deg`: angular SD about the mean gaze direction
+* `precision_rms_s2s_deg`: RMS of the sample-to-sample angular differences between consecutive samples, at most 12.5 ms (1.5 frames) apart, so a gap left by removed frames is not counted as a step (the precision reported in the paper); `precision_std_deg`: angular SD about the mean gaze direction (the SD row of Table 1)
 * `stimulus_head_x_deg`, `stimulus_head_y_deg`: horizontal and vertical angle from the limbus centre to the target, in the head (front-facing camera) frame; `stimulus_distance_mm`: distance from the limbus centre to the target
 * `head_movement_mm`, `head_movement_deg`: RMS deviation of the head position and orientation from their mean over the fixation
 * `stimulus_monitor_x_deg`, `stimulus_monitor_y_deg`: nominal target position on the display grid
