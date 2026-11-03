@@ -9,8 +9,7 @@ This repository contains the data and analysis code for the paper:
 The paper is currently in review, and the details will be updated here if and when it is published.
 
 The scripts in `Code/` reproduce the paper's Figures 4–15, Table 1, and the statistics quoted in
-the Results from the data in `Data/`. See [Errata](#errata) for the places where the submitted
-text differs from what the data give.
+the Results from the data in `Data/`.
 
 ## Repository Structure
 
@@ -60,7 +59,7 @@ participant did not take part in that experiment.
 * `n_fixations`, `n_fixations_valid`: all fixations, and the valid ones (`is_fixation_valid`)
 * `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
 * `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 8–9; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
-* `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
+* `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink between −1,300 and 1,500 ms (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
 * `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
 * `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 15)
 * `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable

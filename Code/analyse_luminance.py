@@ -8,9 +8,9 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib import ticker
-from statsmodels.formula.api import ols
+from scipy import stats
+from statsmodels.formula.api import mixedlm, ols
 
 from utils import (EYE_COLORS, EYES, IG, angle_deviation, angle_unit, blank, data_path, mean_trace,
                    read_series, save_figure, unit_mean)
@@ -18,10 +18,14 @@ from utils import (EYE_COLORS, EYES, IG, angle_deviation, angle_unit, blank, dat
 MS = 1 / 1000  # [s] per ms; windows are given in ms relative to the luminance change
 # Analysis windows (Methods): baseline, constriction, recovery
 PARTS = {"before": (-500, 0), "during": (220, 720), "after": (1000, 1500)}
-# The windows of the constriction figure quoted in the Results (see the README errata)
-CONSTRICTION_WINDOWS = {"before": (-1000, 0), "after": (1000, 2000)}
-EVENT_LOOKBACK = 1000  # [ms] saccades/blinks are looked for from here before the change
+# No-change control: the same shift between two windows before the change, against the baseline
+CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target appears
+# [ms] a saccade or blink here can move gaze between the windows of either shift (control start
+# to recovery end); events outside it cannot, and do not exclude the episode
+EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
 FIG10 = "p011"
+N_BOOT = 10000  # participant-level bootstrap resamples
+SEED = 1
 
 
 def load():
@@ -64,13 +68,17 @@ def episode_metrics(ep, events, series):
                 m[f"gaze_spread_{part}"] = angle_deviation(gd) if len(gd) else np.nan
                 means[part] = unit_mean(gd) if len(gd) else None
                 m[f"pupil_{part}"] = d.pupil_diameter_mm.loc[window(r, part)].median()
-            for part in CONSTRICTION_WINDOWS:
-                m[f"pupil_{part}_long"] = d.pupil_diameter_mm.loc[window(r, part, CONSTRICTION_WINDOWS)].median()
             m["shift"] = (angle_unit(means["before"], means["after"])
                           if means["before"] is not None and means["after"] is not None else np.nan)
+            early = d.loc[window(r, "early", CONTROL_WINDOW), IG]
+            m["shift_control"] = (angle_unit(unit_mean(early), means["before"])
+                                  if len(early) and means["before"] is not None else np.nan)
+            m["pupil_early"] = d.pupil_diameter_mm.loc[window(r, "early", CONTROL_WINDOW)].median()
+            m["pupil_change"] = m["pupil_before"] - m["pupil_after"]  # constriction > 0
+            m["pupil_change_control"] = m["pupil_early"] - m["pupil_before"]
             ev = events[(events.participant == r.participant) & (events.eye == eye)]
-            t_from = r.t_change - EVENT_LOOKBACK * MS
-            overlap = (ev.t_end_sec > t_from) & (ev.t_start_sec < r.t_end)
+            span = window(r, "span", {"span": EVENT_SPAN})
+            overlap = (ev.t_end_sec > span.start) & (ev.t_start_sec < span.stop)
             m["n_saccades"] = int((overlap & (ev.event == "saccade")).sum())
             m["n_blinks"] = int((overlap & (ev.event == "blink")).sum())
             rows.append(m)
@@ -91,18 +99,75 @@ def clean_episodes(metrics):
 
 
 def print_stats(clean):
-    long = (clean.pupil_before_long - clean.pupil_after_long).mean()
-    short = (clean.pupil_before - clean.pupil_after).mean()
-    print(f"Mean constriction, {CONSTRICTION_WINDOWS['before']} vs {CONSTRICTION_WINDOWS['after']} ms: "
-          f"{long:.4f} mm (Results); {PARTS['before']} vs {PARTS['after']} ms: {short:.4f} mm (Methods windows)")
-    print(f"Apparent gaze shift: {clean['shift'].mean():.3f} +/- {clean['shift'].std():.3f} deg")
-
-    clean["pupil_change"] = clean.pupil_before - clean.pupil_after
+    print(f"Constriction: {clean.pupil_change.mean():.3f} +/- {clean.pupil_change.std():.3f} mm; "
+          f"apparent gaze shift: {clean['shift'].mean():.3f} +/- {clean['shift'].std():.3f} deg; "
+          f"control shift: {clean.shift_control.mean():.3f} +/- {clean.shift_control.std():.3f} deg")
     fit = ols("shift ~ pupil_change", data=clean).fit()
     print(f"OLS shift ~ constriction: b = {fit.params.pupil_change:.3f} deg/mm, "
           f"F({fit.df_model:.0f}, {fit.df_resid:.0f}) = {fit.fvalue:.2f}, p = {fit.f_pvalue:.2e}, "
           f"R2 = {fit.rsquared:.3f}")
     return clean
+
+
+def print_mixed_model(clean):
+    """shift ~ constriction with participant and episode-within-participant random intercepts, so
+    the two eyes of an episode and the episodes of a participant are not counted as independent.
+    ML fits; the slope is tested by LRT against the model without it."""
+    kw = dict(groups="participant", re_formula="1", vc_formula={"episode": "0 + C(episode)"})
+    full = mixedlm("shift ~ pupil_change + eye", clean, **kw).fit(reml=False)
+    null = mixedlm("shift ~ eye", clean, **kw).fit(reml=False)
+    lr = 2 * (full.llf - null.llf)
+    lo, hi = full.conf_int().loc["pupil_change"]
+    print(f"Mixed model shift ~ constriction + eye + (1|participant) + (1|episode): "
+          f"b = {full.params.pupil_change:.3f} deg/mm [95% CI {lo:.3f}, {hi:.3f}], "
+          f"intercept = {full.params.Intercept:.3f} deg, "
+          f"LRT chi2(1) = {lr:.2f}, p = {stats.chi2.sf(lr, 1):.2e}")
+    print(f"  variances: participant {full.cov_re.iloc[0, 0]:.4f}, episode {full.vcomp[0]:.4f}, "
+          f"residual {full.scale:.4f} deg^2")
+    fit = full
+
+    # check: the two eyes averaged, one row per episode
+    ep = clean.groupby(["participant", "episode"])[["shift", "pupil_change"]].mean().reset_index()
+    full = mixedlm("shift ~ pupil_change", ep, groups="participant").fit(reml=False)
+    null = mixedlm("shift ~ 1", ep, groups="participant").fit(reml=False)
+    lr = 2 * (full.llf - null.llf)
+    lo, hi = full.conf_int().loc["pupil_change"]
+    print(f"  per-episode means ({len(ep)} episodes): b = {full.params.pupil_change:.3f} deg/mm "
+          f"[95% CI {lo:.3f}, {hi:.3f}], LRT chi2(1) = {lr:.2f}, p = {stats.chi2.sf(lr, 1):.2e}")
+    return fit
+
+
+def print_control(clean):
+    """Is the apparent shift across the luminance change larger than across an interval of the
+    same episode without one? Paired per episode-eye, tested on participant means (Wilcoxon
+    signed-rank); the CI is in the bootstrap."""
+    diff = (clean["shift"] - clean.shift_control).groupby(clean.participant).mean()
+    w = stats.wilcoxon(diff)
+    print(f"Shift - control, participant means: median {diff.median():.3f} deg, "
+          f"{(diff > 0).sum()}/{len(diff)} participants > 0, Wilcoxon W = {w.statistic:.0f}, p = {w.pvalue:.2e}")
+
+
+def print_bootstrap(clean):
+    """Gaze shift, constriction and the no-change control with 95% CIs from resampling
+    participants with replacement, each keeping all its episode-eyes."""
+    by_pid = {pid: g for pid, g in clean.groupby("participant")}
+    pids = list(by_pid)
+    rng = np.random.default_rng(SEED)
+    stats_of = {"mean shift": lambda d: d["shift"].mean(), "median shift": lambda d: d["shift"].median(),
+                "mean constriction": lambda d: d.pupil_change.mean(),
+                "mean control shift": lambda d: d.shift_control.mean(),
+                "mean control constriction": lambda d: d.pupil_change_control.mean(),
+                "mean shift - control": lambda d: (d["shift"] - d.shift_control).mean()}
+    boot = {k: np.empty(N_BOOT) for k in stats_of}
+    for i in range(N_BOOT):
+        d = pd.concat([by_pid[p] for p in rng.choice(pids, len(pids))])
+        for k, f in stats_of.items():
+            boot[k][i] = f(d)
+    print(f"Participant bootstrap ({len(pids)} participants, {N_BOOT} resamples), 95% CI:")
+    for k, f in stats_of.items():
+        lo, hi = np.percentile(boot[k], [2.5, 97.5])
+        unit = "mm" if "constriction" in k else "deg"
+        print(f"  {k}: {f(clean):.3f} [{lo:.3f}, {hi:.3f}] {unit}")
 
 
 # ---------------------------------------------------------------------------- figures
@@ -140,12 +205,17 @@ def fig10(protocol, ep, series):
     save_figure(fig, "fig10_example_participant")
 
 
-def fig11(ep, clean, series, t_pre=1000, t_post=1500):
+def fig11(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     """Pupil diameter, its change, and gaze shift around the change, every clean episode-eye;
-    black: the mean trace. Baselines: the second before the change."""
+    black: the mean trace. Baselines: the baseline window. Dark background shaded; the control,
+    baseline and recovery windows between dashed lines."""
+    b0, b1 = PARTS["before"]
     fig, axs = plt.subplots(3, 1, sharex=True, figsize=(9, 6.5))
     for ax in axs:
         ax.axvspan(-t_pre, 0, fc="k", alpha=0.5)
+        for a, b in (CONTROL_WINDOW["early"], PARTS["before"], PARTS["after"]):
+            ax.axvline(a, color="k", linestyle="--", linewidth=0.8)
+            ax.axvline(b, color="k", linestyle="--", linewidth=0.8)
     pupil_traces, gaze_traces = [], []
     times = ep.set_index(["participant", "episode"]).t_change
     for _, r in clean.iterrows():
@@ -156,13 +226,13 @@ def fig11(ep, clean, series, t_pre=1000, t_post=1500):
         pupil = d.pupil_diameter_mm.copy()
         pupil.index = (pupil.index - t0) / MS
         axs[0].plot(pupil.index, pupil, color=c, alpha=0.5, linewidth=0.3)
-        change = (pupil - pupil.loc[-1000:0].mean()).rolling(5, center=True).mean()
+        change = (pupil - pupil.loc[b0:b1].median()).rolling(5, center=True).mean()
         axs[1].plot(change.index, change, color=c, alpha=0.5, linewidth=0.3)
         pupil_traces.append(change)
 
         gd = d[IG].copy()
         gd.index = (gd.index - t0) / MS
-        base = unit_mean(gd.loc[-1000:0])
+        base = unit_mean(gd.loc[b0:b1])
         shift = gd.apply(lambda v: angle_unit(v, base), axis=1).rolling(11, center=True).mean()
         axs[2].plot(shift.index, shift, color=c, alpha=0.5, linewidth=0.3)
         gaze_traces.append(shift)
@@ -181,18 +251,28 @@ def fig11(ep, clean, series, t_pre=1000, t_post=1500):
     save_figure(fig, "fig11_luminance_change")
 
 
-def fig12(clean):
-    """Apparent gaze shift against pupil constriction, with the OLS fit over all episode-eyes.
-    The x axis starts at 0, as in the paper, so the few dilating episode-eyes (x < 0) are fitted
-    but not shown."""
-    g = sns.lmplot(data=clean, x="pupil_change", y="shift")
-    g.set_axis_labels("Pupil Size Change (mm)", "Apparent Gaze Shift (deg)")
+def fig12(clean, fit):
+    """Apparent gaze shift against pupil constriction, every clean episode-eye, with the mixed
+    model's fixed-effect line (the two eyes averaged) and its 95% CI. The x axis starts at 0, as in
+    the paper, so the few dilating episode-eyes (x < 0) are fitted but not shown."""
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.scatter(clean.pupil_change, clean["shift"], s=12, alpha=0.6)
+    x = np.linspace(0, 2.30, 50)
+    cols = {"Intercept": np.ones_like(x), "eye[T.right]": np.full_like(x, 0.5), "pupil_change": x}
+    names = list(fit.fe_params.index)
+    X = np.column_stack([cols[n] for n in names])
+    y = X @ fit.fe_params.to_numpy()
+    se = np.sqrt(np.einsum("ij,jk,ik->i", X, fit.cov_params().loc[names, names].to_numpy(), X))
+    ax.plot(x, y, "k-")
+    ax.fill_between(x, y - 1.96 * se, y + 1.96 * se, color="k", alpha=0.15, linewidth=0)
     hidden = clean[clean.pupil_change < 0]
     print(f"Fig 12: {len(hidden)} episode-eyes with dilation (x < 0) are in the fit but outside the plot")
-    plt.xlim(0, 2.30)
-    plt.ylim(bottom=-0.02)
-    plt.grid()
-    save_figure(g.figure, "fig12_shift_vs_constriction")
+    ax.set_xlabel("Pupil Size Change (mm)")
+    ax.set_ylabel("Apparent Gaze Shift (deg)")
+    ax.set_xlim(0, 2.30)
+    ax.set_ylim(bottom=-0.02)
+    ax.grid()
+    save_figure(fig, "fig12_shift_vs_constriction")
 
 
 def main():
@@ -202,11 +282,20 @@ def main():
 
     protocol, events, series = load()
     ep = episodes(protocol)
-    clean = print_stats(clean_episodes(episode_metrics(ep, events, series)))
+    metrics = episode_metrics(ep, events, series)
+    clean = print_stats(clean_episodes(metrics))
+    fit = print_mixed_model(clean)
+    print_control(clean)
+    print_bootstrap(clean)
+
+    print(f"\nAll episodes, no saccade/blink exclusion ({len(metrics)} episode-eyes):")
+    print_stats(metrics)
+    print_mixed_model(metrics)
+    print_control(metrics)
 
     fig10(protocol, ep, series)
     fig11(ep, clean, series)
-    fig12(clean)
+    fig12(clean, fit)
     if args.show:
         plt.show()
 
