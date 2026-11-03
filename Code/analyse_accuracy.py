@@ -77,6 +77,29 @@ def table1(edata, n_all):
     return ue
 
 
+def table1_by_training(edata):
+    """Table 1 with each cell as `all (trained/untrained)`: participants with and without other
+    sessions in the model's training set. The groups keep the whole cohort's weights."""
+    groups = {"all": None, "trained": True, "untrained": False}
+    for label, flag in groups.items():
+        g = edata if flag is None else edata[edata.participant_in_training_set == flag]
+        print(f"{label}: {len(g)} fixations from {g.participant.nunique()} participants")
+    rows = {}
+    for metric, (name, _) in TABLE1.items():
+        whole = inverse_weights(edata, metric, CELL, MIN_IN_CELL)
+        central = inverse_weights(edata, metric, CELL, MIN_IN_CELL, CENTRAL)
+        cols = []
+        for flag in groups.values():
+            sel = [d if flag is None else d[d.participant_in_training_set == flag]
+                   for d in (edata, whole, central)]
+            cols.append([pooled_median(sel[0], metric), pooled_median(sel[1], metric, "weight"),
+                         pooled_median(sel[2], metric, "weight")])
+        rows[name] = [f"{a:.3f} ({t:.3f}/{u:.3f})" for a, t, u in zip(*cols)]
+    t1 = pd.DataFrame(rows, index=["Unweighted, all fixations", "Weighted, all FOV",
+                                   "Weighted, central FOV"]).T
+    print(f"\nTable 1 by training set, all (trained/untrained) [deg]\n{t1.to_string()}")
+
+
 # ---------------------------------------------------------------------------- figures
 
 
@@ -213,6 +236,7 @@ def main():
 
     print_counts(df)
     ue = table1(edata, len(df))
+    table1_by_training(edata)
 
     fig4()
     fig5(df)
