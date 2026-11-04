@@ -115,12 +115,14 @@ stalled repeatedly and skipped 14 of the 61 targets.
 
 ### Background luminance change (`Data/2_luminance/`)
 
-**`{participant}_{eye}.csv`** — per-sample gaze and pupil size:
+**`{participant}_{eye}.csv`** — per-sample gaze, target direction and pupil size:
 
 * `timestamp_sec`
 * `igX`, `igY`, `igZ`: gaze direction, a unit vector in the head frame; by convention it points *into* the eye
 * `azimuth_deg`, `elevation_deg`: the same gaze as angles
 * `pupil_diameter_mm`: pupil diameter, with isolated single-sample drops corrected
+* `stimulus_dir_x`, `stimulus_dir_y`, `stimulus_dir_z`: direction between the limbus centre and the target, a unit vector in the head frame, pointing *into* the eye like `igX/igY/igZ`. The displayed target position is carried into the head frame by the head pose, so it follows head movement; empty where there is no head pose
+* `stimulus_azimuth_deg`, `stimulus_elevation_deg`: the same direction as angles, comparable with `azimuth_deg`, `elevation_deg`
 * `blink`: the sample lies in a detected blink; the analyses treat it as missing
 
 **`protocol.csv`** — the stimulus log: `participant`, `t_start_sec`, `t_end_sec`,
