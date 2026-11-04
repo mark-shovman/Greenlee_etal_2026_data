@@ -9,20 +9,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib import ticker
+from matplotlib.patches import Rectangle
 from scipy import stats
 from statsmodels.formula.api import mixedlm, ols
 
-from utils import (EYE_COLORS, EYES, IG, angle_deviation, angle_unit, blank, data_path, finish_timeline,
+from utils import (EYE_COLORS, EYES, IG, angle_unit, blank, data_path, finish_timeline,
                    kappa_blocks, mean_trace, read_series, save_figure, timeline_figure, unit_mean)
 
 MS = 1 / 1000  # [s] per ms; windows are given in ms relative to the luminance change
-# Analysis windows (Methods): baseline, constriction, recovery
-PARTS = {"before": (-500, 0), "during": (220, 720), "after": (1000, 1500)}
+# Analysis windows (Methods): baseline, recovery
+PARTS = {"before": (-500, 0), "after": (1000, 1500)}
 # No-change control: the same shift between two windows before the change, against the baseline
 CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target appears
 # [ms] a saccade or blink here can move gaze between the windows of either shift (control start
 # to recovery end); events outside it cannot, and do not exclude the episode
 EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
+WINDOWS = (CONTROL_WINDOW["early"], PARTS["before"], PARTS["after"])  # drawn in Figs 13-14
 FIG13 = "p011"  # also did the grid task, whose kappa corrects the figure's gaze
 N_BOOT = 10000  # participant-level bootstrap resamples
 SEED = 1
@@ -49,13 +51,21 @@ def episodes(protocol):
     return pd.DataFrame(rows, columns=["participant", "episode", "x", "y", "t_start", "t_change", "t_end"])
 
 
+def draw_windows(ax, t0=0, unit=1):
+    """The control, baseline and recovery windows as thin open boxes over 5-95% of the panel
+    height; t0: the luminance change, unit: x-axis units per ms."""
+    for a, b in WINDOWS:
+        ax.add_patch(Rectangle((t0 + a * unit, 0.05), (b - a) * unit, 0.9, transform=ax.get_xaxis_transform(),
+                               fill=False, edgecolor="k", linewidth=0.8, zorder=3))
+
+
 def window(r, part, parts=PARTS):
     t0, t1 = parts[part]
     return slice(r.t_change + t0 * MS, r.t_change + t1 * MS)
 
 
 def episode_metrics(ep, events, series):
-    """Per episode and eye: gaze spread and median pupil per window, apparent gaze shift, and
+    """Per episode and eye: median pupil per window, apparent gaze shift, and
     the saccades and blinks overlapping the episode."""
     rows = []
     for _, r in ep.iterrows():
@@ -65,7 +75,6 @@ def episode_metrics(ep, events, series):
             means = {}
             for part in PARTS:
                 gd = d.loc[window(r, part), IG]
-                m[f"gaze_spread_{part}"] = angle_deviation(gd) if len(gd) else np.nan
                 means[part] = unit_mean(gd) if len(gd) else None
                 m[f"pupil_{part}"] = d.pupil_diameter_mm.loc[window(r, part)].median()
             m["shift"] = (angle_unit(means["before"], means["after"])
@@ -198,6 +207,7 @@ def fig13(ep, series):
         for _, r in ep[ep.participant == FIG13].iterrows():
             ax.axvline(r.t_start, linestyle="--", color="k")
             ax.axvspan(r.t_change, r.t_end, fc="white", alpha=1)
+            draw_windows(ax, r.t_change, MS)
     axs[0].set_ylabel("Azimuth (deg)")
     axs[1].set_ylabel("Elevation (deg)")
     axs[2].set_ylabel("Pupil diameter (mm)")
@@ -208,14 +218,12 @@ def fig13(ep, series):
 def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     """Pupil diameter, its change, and gaze shift around the change, every clean episode-eye;
     black: the mean trace. Baselines: the baseline window. Dark background shaded; the control,
-    baseline and recovery windows between dashed lines."""
+    baseline and recovery windows as open boxes."""
     b0, b1 = PARTS["before"]
     fig, axs = plt.subplots(3, 1, sharex=True, figsize=(9, 6.5))
     for ax in axs:
         ax.axvspan(-t_pre, 0, fc="k", alpha=0.5)
-        for a, b in (CONTROL_WINDOW["early"], PARTS["before"], PARTS["after"]):
-            ax.axvline(a, color="k", linestyle="--", linewidth=0.8)
-            ax.axvline(b, color="k", linestyle="--", linewidth=0.8)
+        draw_windows(ax)
     pupil_traces, gaze_traces = [], []
     times = ep.set_index(["participant", "episode"]).t_change
     for _, r in clean.iterrows():
@@ -247,7 +255,7 @@ def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
     for ax in axs:
         ax.grid(True)
-        ax.set_xlim(-t_pre, t_post)
+        ax.set_xlim(-t_pre - 50, t_post + 50)  # [ms] margin: the outer windows end at the data span
     save_figure(fig, "fig14_luminance_change")
 
 

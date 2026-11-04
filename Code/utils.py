@@ -79,12 +79,6 @@ def unit_mean(gd):
     return m / np.linalg.norm(m)
 
 
-def angle_deviation(gd):
-    """Mean angular deviation [deg] of the rows of gd from their mean direction."""
-    m = unit_mean(gd)
-    return np.nanmean([angle_unit(gd.iloc[i].values, m) for i in range(len(gd))])
-
-
 def unit_to_az_el(v):
     """Tangent (flat-screen) azimuth and elevation [deg] of direction vectors, shape (n, 3)."""
     v = np.asarray(v)
