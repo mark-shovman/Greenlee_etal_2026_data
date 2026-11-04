@@ -15,7 +15,7 @@ import pandas as pd
 import analyse_luminance as lum
 import analyse_vergence as vs
 from analyse_accuracy import CELL, CENTRAL, METRICS, MIN_IN_CELL
-from utils import ROOT, data_path, inverse_weights, nan_safe_percentile, weighted_percentile
+from utils import ROOT, data_path, inverse_weights, kappa_blocks, nan_safe_percentile, weighted_percentile
 
 TABLES = os.path.join(ROOT, "Tables")
 N_BOOT = 2000
@@ -71,16 +71,6 @@ def grid_columns():
                 "n_precision_whole", "n_precision_central"):
         out[col] = out[col].fillna(0).astype(int)
     return out, ue50, len(edata), blocks
-
-
-def kappa_blocks(df):
-    """Kappa per grid block: the median offset over the block's valid fixations, as reported. The
-    accuracy numbers use the per-half kappa instead (kappa_x_deg), fitted on the other half."""
-    g = df.groupby(["participant", "eye", "recording", "grid"])
-    out = g[["kappa_grid_x_deg", "kappa_grid_y_deg"]].first().rename(
-        columns={"kappa_grid_x_deg": "kappa_x_deg", "kappa_grid_y_deg": "kappa_y_deg"})
-    out["n_fixations_valid"] = g.is_fixation_valid.sum().astype(int)
-    return out.reset_index()
 
 
 # ---------------------------------------------------------------------------- luminance

@@ -10,11 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib import ticker
 from scipy import stats
 
-from utils import (EYE_COLORS, EYES, IC, IG, blank, calculate_vergence_point, data_path, read_series,
-                   save_figure, vergence_distance)
+from utils import (EYE_COLORS, EYES, IC, IG, blank, calculate_vergence_point, data_path, finish_timeline,
+                   read_series, save_figure, timeline_figure, vergence_distance)
 
 N_DEPTHS = 6
 MIN_FIXATION_DURATION = 1.0  # [s] a reference fixation must last this long
@@ -180,9 +179,12 @@ def fig16(s, fixations, raw, clean):
     """Two runs end to end: gaze azimuth and elevation per eye (faint: before blink removal),
     binocular fixations (cyan), instantaneous vergence distance (grey) and each stimulus's
     vergence over its reference fixation (black)."""
-    fig, all_axs = plt.subplots(3, 2, figsize=(16, 8))
+    fig, all_axs = timeline_figure(3, 2)
+    span = [np.inf, -np.inf]  # [s] the shared time axis covers both runs
     for col, (pid, rec) in enumerate(FIG16):
         axs = all_axs[:, col]
+        g = s[(s.participant == pid) & (s.recording == rec)].sort_values("t_start_sec")
+        t0, t1 = g.t_start_sec.iloc[0], g.t_end_sec.iloc[-1]
         for eye in EYES:
             c = EYE_COLORS[eye]
             for d, kw in ((raw[(pid, rec, eye)], dict(linewidth=0.3, alpha=0.1)), (clean[(pid, rec, eye)], {})):
@@ -193,29 +195,25 @@ def fig16(s, fixations, raw, clean):
                 ax.axvspan(f.t_start_sec, f.t_end_sec, color="cyan", alpha=0.2)
         va = angle_vergence_series(clean, pid, rec) / 1000
         axs[2].plot(va.index, va, c="k", alpha=0.3)
-        g = s[(s.participant == pid) & (s.recording == rec)].sort_values("t_start_sec")
         for _, r in g.dropna(subset=["vergence_distance"]).iterrows():
             y = r.vergence_distance / 1000
             axs[2].plot((r.t_fix_start_offset, r.t_fix_end), (y, y), color="k")
             axs[2].text(r.t_fix_start_offset, y, f"[{r.symbol}]\n{y:.2f}", ha="right", va="center", weight="bold")
         # scale to the blink-free data; the faint traces' blink artefacts run off the axes
-        t0, t1 = g.t_start_sec.iloc[0], g.t_end_sec.iloc[-1]
         for ax, col in zip(axs[:2], ["azimuth_deg", "elevation_deg"]):
             v = pd.concat([clean[(pid, rec, eye)].loc[t0:t1, col] for eye in EYES])
             ax.set_ylim(v.min() - 1, v.max() + 1)
         axs[2].set_ylim(va.loc[t0:t1].quantile(.01) - 0.1, va.loc[t0:t1].quantile(.99) + 0.1)
+        span = [min(span[0], t0), max(span[1], t1)]
         for ax in axs:
-            ax.set_xlim(t0, t1)
-            ax.grid(True)
             for t in list(g.t_start_sec) + [g.t_end_sec.iloc[-1]]:
                 ax.axvline(t, color="k", linestyle="--")
         axs[0].set_title(f"{pid} {rec}")
         axs[0].set_ylabel("Azimuth (deg)")
         axs[1].set_ylabel("Elevation (deg)")
         axs[2].set_ylabel("Vergence distance (m)")
-        axs[2].set_xlabel("Time (s)")
-        axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.1f}"))
-    fig.tight_layout()
+    all_axs[0, 0].set_xlim(*span)
+    finish_timeline(all_axs)
     save_figure(fig, "fig16_example_runs")
 
 

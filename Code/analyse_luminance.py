@@ -12,8 +12,8 @@ from matplotlib import ticker
 from scipy import stats
 from statsmodels.formula.api import mixedlm, ols
 
-from utils import (EYE_COLORS, EYES, IG, angle_deviation, angle_unit, blank, data_path, mean_trace,
-                   read_series, save_figure, unit_mean)
+from utils import (EYE_COLORS, EYES, IG, angle_deviation, angle_unit, blank, data_path, finish_timeline,
+                   kappa_blocks, mean_trace, read_series, save_figure, timeline_figure, unit_mean)
 
 MS = 1 / 1000  # [s] per ms; windows are given in ms relative to the luminance change
 # Analysis windows (Methods): baseline, constriction, recovery
@@ -23,7 +23,7 @@ CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target
 # [ms] a saccade or blink here can move gaze between the windows of either shift (control start
 # to recovery end); events outside it cannot, and do not exclude the episode
 EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
-FIG13 = "p011"
+FIG13 = "p011"  # also did the grid task, whose kappa corrects the figure's gaze
 N_BOOT = 10000  # participant-level bootstrap resamples
 SEED = 1
 
@@ -173,35 +173,35 @@ def print_bootstrap(clean):
 # ---------------------------------------------------------------------------- figures
 
 
-def fig13(protocol, ep, series):
-    """One participant end to end: stimulus, gaze relative to its first sample, pupil."""
-    p = protocol[protocol.participant == FIG13]
-    t0 = p.t_start_sec.iloc[0]
-    fig, axs = plt.subplots(3, 1, sharex=True)
-    # the protocol's Y runs the opposite way to gaze elevation, hence the sign
-    for sign, col, ax in zip((1, -1), ["stimulus_x_deg", "stimulus_y_deg"], axs):
-        ax.step((p.t_start_sec - t0) / MS, sign * p[col], where="post", color="k")
-    for eye in EYES:
+def fig13(ep, series):
+    """One participant end to end: gaze (visual axis) and the stimulus as seen from each eye
+    (black: solid left, dashed right) in the head frame, and pupil diameter; blinks removed. The
+    gaze is corrected with the participant's kappa from the grid task, the median over its grid
+    blocks (Tables/kappa_blocks); the luminance analysis itself uses the uncorrected optical axis."""
+    blocks = kappa_blocks(pd.read_csv(data_path("1_accuracy", "fixations.csv")))
+    kappa = blocks[blocks.participant == FIG13].groupby("eye")[["kappa_x_deg", "kappa_y_deg"]].median()
+    print(f"Fig 13: {FIG13} grid kappa " + ", ".join(
+        f"{eye} {r.kappa_x_deg:.2f} by {r.kappa_y_deg:.2f} deg" for eye, r in kappa.iterrows()))
+    fig, grid = timeline_figure(3)
+    axs = grid[:, 0]
+    for eye, style in zip(EYES, ("-", "--")):
         d = series[(FIG13, eye)]
-        gd = d[["azimuth_deg", "elevation_deg"]]
-        gd = gd - gd.iloc[0]
-        t = (d.index - t0) / MS
-        axs[0].plot(t, gd.azimuth_deg, color=EYE_COLORS[eye])
-        axs[1].plot(t, gd.elevation_deg, color=EYE_COLORS[eye])
+        for ax, angle, k in zip(axs, ["azimuth_deg", "elevation_deg"], ["kappa_x_deg", "kappa_y_deg"]):
+            # visual = optical - kappa, per tangent angle (as the grid's visual_axis)
+            ax.plot(d.index, d[angle] - kappa.at[eye, k], color=EYE_COLORS[eye])
+            ax.plot(d.index, d[f"stimulus_{angle}"], "k" + style, linewidth=1)
         pupil = d.pupil_diameter_mm.sort_index()
-        axs[2].plot((pupil.index - t0) / MS, pupil, color=EYE_COLORS[eye])
+        axs[2].plot(pupil.index, pupil, color=EYE_COLORS[eye])
     for ax in axs:
         ax.set_facecolor("gray")
-        ax.set_xlim(0, 32000)
-        ax.grid(True)
+        ax.set_xlim(0, 32)
         for _, r in ep[ep.participant == FIG13].iterrows():
-            ax.axvline((r.t_start - t0) / MS, linestyle="--", color="k")
-            ax.axvspan((r.t_change - t0) / MS, (r.t_end - t0) / MS, fc="white", alpha=1)
+            ax.axvline(r.t_start, linestyle="--", color="k")
+            ax.axvspan(r.t_change, r.t_end, fc="white", alpha=1)
     axs[0].set_ylabel("Azimuth (deg)")
     axs[1].set_ylabel("Elevation (deg)")
     axs[2].set_ylabel("Pupil diameter (mm)")
-    axs[2].set_xlabel("Time (msec)")
-    axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+    finish_timeline(grid)
     save_figure(fig, "fig13_example_participant")
 
 
@@ -243,7 +243,7 @@ def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     axs[0].set_ylabel("Pupil diameter (mm)")
     axs[1].set_ylabel("Pupil size change (mm)")
     axs[2].set_ylabel("Gaze shift (deg)")
-    axs[2].set_xlabel("Time (msec)")
+    axs[2].set_xlabel("Time (ms)")
     axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
     for ax in axs:
         ax.grid(True)
@@ -293,7 +293,7 @@ def main():
     print_mixed_model(metrics)
     print_control(metrics)
 
-    fig13(protocol, ep, series)
+    fig13(ep, series)
     fig14(ep, clean, series)
     fig15(clean, fit)
     if args.show:

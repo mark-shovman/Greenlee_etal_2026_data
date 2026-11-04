@@ -11,8 +11,8 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.patches import Rectangle
 
-from utils import (data_path, inverse_weights, pooled_median, save_figure, ue_percentiles,
-                   unit_to_az_el)
+from utils import (EYE_COLORS, EYES, data_path, finish_timeline, inverse_weights, pooled_median,
+                   save_figure, timeline_figure, ue_percentiles, unit_to_az_el)
 
 CELL = 3.0  # FOV cell size [deg]; cells are centred on 0
 MIN_IN_CELL = 5  # small-stratum safeguard of the inverse-density weighting
@@ -108,29 +108,27 @@ def fig7():
     (black: solid left, dashed right) in the head frame, whole fixations with blinks left in.
     Angles of the negated vectors, as in the original figure."""
     rec, fixations = FIG7
-    fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    fig, grid = timeline_figure(2)
+    axs = grid[:, 0]
+    data = {eye: pd.read_csv(data_path("1_accuracy", f"{rec}_{eye}.csv")) for eye in EYES}
+    data = {eye: d[d.fixation.isin(fixations)] for eye, d in data.items()}
     lims = [[np.inf, -np.inf], [np.inf, -np.inf]]
-    for eye, color, style in (("left", "tab:blue", "-"), ("right", "tab:red", "--")):
-        d = pd.read_csv(data_path("1_accuracy", f"{rec}_{eye}.csv"))
-        d = d[d.fixation.isin(fixations)]
-        for num, f in d.groupby("fixation"):
+    for eye, style in zip(EYES, ("-", "--")):
+        for num, f in data[eye].groupby("fixation"):
+            t = f.timestamp_sec
             gaze = unit_to_az_el(-f[["visual_axis_x", "visual_axis_y", "visual_axis_z"]].to_numpy())
             stim = unit_to_az_el(-f[["stimulus_dir_x", "stimulus_dir_y", "stimulus_dir_z"]].to_numpy())
-            first = num == fixations[0]
             for i, ax in enumerate(axs):
-                ax.plot(f.timestamp_sec, gaze[i], "-", color=color, label=f"{eye} eye gaze" if first else None)
-                ax.plot(f.timestamp_sec, stim[i], "k" + style, linewidth=1,
-                        label=f"stimulus, {eye} eye" if first else None)
+                ax.plot(t, gaze[i], "-", color=EYE_COLORS[eye])
+                ax.plot(t, stim[i], "k" + style, linewidth=1)
                 if eye == "left":
-                    ax.text(f.timestamp_sec.iloc[0], stim[i][0], num, ha="right", va="center")
+                    ax.text(t.iloc[0], stim[i][0], num, ha="right", va="center")
                 lims[i] = [min(lims[i][0], stim[i].min()), max(lims[i][1], stim[i].max())]
     for ax, (lo, hi) in zip(axs, lims):
         ax.set_ylim(lo - 2, hi + 2)  # blink artefacts run off the scale, as in the paper
-        ax.grid(True)
-    axs[0].legend(loc="upper right", fontsize="small", ncol=2)
     axs[0].set_ylabel("Azimuth (deg)")
     axs[1].set_ylabel("Elevation (deg)")
-    axs[1].set_xlabel("Time (sec)")
+    finish_timeline(grid)
     save_figure(fig, "fig07_timeline")
 
 

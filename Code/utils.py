@@ -6,6 +6,7 @@ the scripts reproduce the paper's numbers from the open data.
 
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -14,7 +15,11 @@ DATA = os.path.join(ROOT, "Data")
 FIGURES = os.path.join(ROOT, "Figures")
 
 EYES = ["left", "right"]
-EYE_COLORS = {"left": "b", "right": "r"}
+EYE_COLORS = {"left": "tab:blue", "right": "tab:red"}
+
+# The example timelines (Figs 7, 13, 16) share width, panel height and the time axis
+TIMELINE_WIDTH = 12  # [in]
+TIMELINE_PANEL_HEIGHT = 2.2  # [in]
 IC = [f"ic{x}" for x in "XYZ"]  # limbus centre [mm]
 IG = [f"ig{x}" for x in "XYZ"]  # gaze direction, a unit vector pointing *into* the eye
 
@@ -35,7 +40,32 @@ def save_figure(fig, name):
     print(f"Saved {path}")
 
 
+def timeline_figure(nrows, ncols=1):
+    """Rows of timeline panels, all sharing one time axis; a 2D array of axes."""
+    return plt.subplots(nrows, ncols, sharex=True, squeeze=False, layout="constrained",
+                        figsize=(TIMELINE_WIDTH, nrows * TIMELINE_PANEL_HEIGHT))
+
+
+def finish_timeline(axs):
+    """Grid on every panel; time on the recording clock, in seconds, under each column."""
+    for ax in axs.flat:
+        ax.grid(True)
+    for ax in axs[-1]:
+        ax.set_xlabel("Time (s)")
+
+
 # ---------------------------------------------------------------------------- angles
+
+
+def kappa_blocks(df):
+    """Kappa per grid block: the median offset over the block's valid fixations, as reported. The
+    accuracy numbers use the per-half kappa instead (kappa_x_deg), fitted on the other half."""
+    g = df.groupby(["participant", "eye", "recording", "grid"])
+    out = g[["kappa_grid_x_deg", "kappa_grid_y_deg"]].first().rename(
+        columns={"kappa_grid_x_deg": "kappa_x_deg", "kappa_grid_y_deg": "kappa_y_deg"})
+    out["n_fixations_valid"] = g.is_fixation_valid.sum().astype(int)
+    return out.reset_index()
+
 
 
 def angle_unit(u, v):
