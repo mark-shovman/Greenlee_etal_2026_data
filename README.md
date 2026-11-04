@@ -59,7 +59,7 @@ participant did not take part in that experiment.
 * `n_fixations`, `n_fixations_valid`: all fixations, and the valid ones (`is_fixation_valid`)
 * `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
 * `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 11–12; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
-* `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink between −1,300 and 1,500 ms (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
+* `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink between −1,300 and 1,500 ms in either eye, and with gaze and pupil in at least 30% of the expected samples of each analysis window in both eyes (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
 * `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
 * `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 18)
 * `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable

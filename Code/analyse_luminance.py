@@ -13,8 +13,8 @@ from matplotlib.patches import Rectangle
 from scipy import stats
 from statsmodels.formula.api import mixedlm, ols
 
-from utils import (EYE_COLORS, EYES, IG, angle_unit, blank, data_path, finish_timeline,
-                   kappa_blocks, mean_trace, read_series, save_figure, timeline_figure, unit_mean)
+from utils import (EYE_COLORS, EYES, IG, align_traces, angle_unit, blank, data_path, finish_timeline,
+                   kappa_blocks, pooled_median, read_series, save_figure, timeline_figure, unit_mean)
 
 MS = 1 / 1000  # [s] per ms; windows are given in ms relative to the luminance change
 # Analysis windows (Methods): baseline, recovery
@@ -25,6 +25,10 @@ CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target
 # to recovery end); events outside it cannot, and do not exclude the episode
 EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
 WINDOWS = (CONTROL_WINDOW["early"], PARTS["before"], PARTS["after"])  # drawn in Figs 13-14
+SAMPLE_RATE = 120  # [Hz] eye cameras
+# Missing-data gate, as the grid's: in each window, the share of the expected samples with gaze and
+# with pupil must be at least this, in both eyes
+MIN_COVERAGE = 0.3
 FIG13 = "p011"  # also did the grid task, whose kappa corrects the figure's gaze
 N_BOOT = 10000  # participant-level bootstrap resamples
 SEED = 1
@@ -65,8 +69,10 @@ def window(r, part, parts=PARTS):
 
 
 def episode_metrics(ep, events, series):
-    """Per episode and eye: median pupil per window, apparent gaze shift, and
-    the saccades and blinks overlapping the episode."""
+    """Per episode and eye: median pupil per window, apparent gaze shift, the saccades and blinks
+    overlapping the episode, and the lowest share of the expected samples with gaze or with pupil
+    over the three windows (coverage)."""
+    windows = {**CONTROL_WINDOW, **PARTS}
     rows = []
     for _, r in ep.iterrows():
         for eye in EYES:
@@ -90,18 +96,26 @@ def episode_metrics(ep, events, series):
             overlap = (ev.t_end_sec > span.start) & (ev.t_start_sec < span.stop)
             m["n_saccades"] = int((overlap & (ev.event == "saccade")).sum())
             m["n_blinks"] = int((overlap & (ev.event == "blink")).sum())
+            m["coverage"] = min(d.loc[window(r, w, windows), col].notna().sum() / ((t1 - t0) * MS * SAMPLE_RATE)
+                                for w, (t0, t1) in windows.items() for col in ("igX", "pupil_diameter_mm"))
             rows.append(m)
     return pd.DataFrame(rows)
 
 
 def clean_episodes(metrics):
-    """Episodes with no saccade and no blink in either eye; excluded in full otherwise."""
-    per_ep = metrics.groupby(["participant", "episode"])[["n_saccades", "n_blinks"]].sum()
-    ok = per_ep[(per_ep.n_saccades < 1) & (per_ep.n_blinks < 1)].index
+    """Episodes with no saccade and no blink in either eye, and with both eyes passing the
+    missing-data gate; excluded in full otherwise."""
+    per_ep = metrics.groupby(["participant", "episode"]).agg(
+        n_saccades=("n_saccades", "sum"), n_blinks=("n_blinks", "sum"), coverage=("coverage", "min"))
+    no_event = (per_ep.n_saccades < 1) & (per_ep.n_blinks < 1)
+    covered = per_ep.coverage >= MIN_COVERAGE
+    ok = per_ep[no_event & covered].index
     keep = metrics.set_index(["participant", "episode"]).index.isin(ok)
-    n_trials, n_excl = len(per_ep), len(per_ep) - len(ok)
+    n_trials = len(per_ep)
+    n_event, n_missing = (~no_event).sum(), (no_event & ~covered).sum()
     print(f"{metrics.participant.nunique()} participants, {n_trials} trials; "
-          f"{n_excl} ({100 * n_excl / n_trials:.1f}%) excluded for a saccade or blink in either eye; "
+          f"{n_event} ({100 * n_event / n_trials:.1f}%) excluded for a saccade or blink in either eye, "
+          f"{n_missing} more for missing data (under {MIN_COVERAGE:.0%} of the expected samples in a window); "
           f"{keep.sum()}/{len(metrics)} episode-eyes kept, from "
           f"{metrics[keep].participant.nunique()} participants")
     return metrics[keep].copy()
@@ -182,6 +196,25 @@ def print_bootstrap(clean):
 # ---------------------------------------------------------------------------- figures
 
 
+def mean_band(aligned, pids):
+    """Mean over the episode-eyes at each time point (columns of aligned), and its 95% band from
+    resampling participants with replacement, each keeping all its episode-eyes (as
+    print_bootstrap). Not drawn where under half of the episode-eyes have data (the span edges)."""
+    codes, uniq = pd.factorize(pids)
+    aligned = np.where(np.isfinite(aligned).mean(1, keepdims=True) >= 0.5, aligned, np.nan)
+    finite = np.isfinite(aligned)
+    s = np.stack([np.where(finite, aligned, 0)[:, codes == k].sum(1) for k in range(len(uniq))])
+    n = np.stack([finite[:, codes == k].sum(1) for k in range(len(uniq))])
+    w = np.random.default_rng(SEED).multinomial(len(uniq), np.full(len(uniq), 1 / len(uniq)), size=N_BOOT)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        boot = (w @ s) / (w @ n)
+        mean = s.sum(0) / n.sum(0)
+    lo, hi = np.full_like(mean, np.nan), np.full_like(mean, np.nan)
+    ok = np.isfinite(mean)
+    lo[ok], hi[ok] = np.percentile(boot[:, ok], [2.5, 97.5], axis=0)
+    return mean, lo, hi
+
+
 def fig13(ep, series):
     """One participant end to end: gaze (visual axis) and the stimulus as seen from each eye
     (black: solid left, dashed right) in the head frame, and pupil diameter; blinks removed. The
@@ -216,38 +249,37 @@ def fig13(ep, series):
 
 
 def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
-    """Pupil diameter, its change, and gaze shift around the change, every clean episode-eye;
-    black: the mean trace. Baselines: the baseline window. Dark background shaded; the control,
-    baseline and recovery windows as open boxes."""
+    """Pupil diameter, its change, and gaze shift around the change. Black: the mean over the
+    clean episode-eyes, with its 95% band from the participant bootstrap; grey: each episode-eye
+    (change and shift only). Change and shift are from the baseline window. Dark background
+    shaded; the control, baseline and recovery windows as open boxes."""
     b0, b1 = PARTS["before"]
-    fig, axs = plt.subplots(3, 1, sharex=True, figsize=(9, 6.5))
-    for ax in axs:
-        ax.axvspan(-t_pre, 0, fc="k", alpha=0.5)
-        draw_windows(ax)
-    pupil_traces, gaze_traces = [], []
+    margin = 50  # [ms] the outer windows end at the data span
+    fig, axs = plt.subplots(3, 1, sharex=True, figsize=(9, 6.5), layout="constrained")
+    traces = {"diameter": [], "change": [], "shift": []}
     times = ep.set_index(["participant", "episode"]).t_change
     for _, r in clean.iterrows():
         t0 = times[(r.participant, r.episode)]
         d = series[(r.participant, r.eye)].loc[t0 - t_pre * MS:t0 + t_post * MS]
-        c = EYE_COLORS[r.eye]
-
         pupil = d.pupil_diameter_mm.copy()
         pupil.index = (pupil.index - t0) / MS
-        axs[0].plot(pupil.index, pupil, color=c, alpha=0.5, linewidth=0.3)
-        change = (pupil - pupil.loc[b0:b1].median()).rolling(5, center=True).mean()
-        axs[1].plot(change.index, change, color=c, alpha=0.5, linewidth=0.3)
-        pupil_traces.append(change)
-
+        traces["diameter"].append(pupil)
+        traces["change"].append((pupil - pupil.loc[b0:b1].median()).rolling(5, center=True).mean())
         gd = d[IG].copy()
         gd.index = (gd.index - t0) / MS
         base = unit_mean(gd.loc[b0:b1])
-        shift = gd.apply(lambda v: angle_unit(v, base), axis=1).rolling(11, center=True).mean()
-        axs[2].plot(shift.index, shift, color=c, alpha=0.5, linewidth=0.3)
-        gaze_traces.append(shift)
+        traces["shift"].append(gd.apply(lambda v: angle_unit(v, base), axis=1).rolling(11, center=True).mean())
 
-    for ax, traces in ((axs[1], pupil_traces), (axs[2], gaze_traces)):
-        grid, mean, _ = mean_trace(traces, t_pre, t_post)
+    for ax, (name, tr) in zip(axs, traces.items()):
+        ax.axvspan(-t_pre - margin, 0, fc="gray")
+        if name != "diameter":
+            for t in tr:
+                ax.plot(t.index, t, color="k", alpha=0.08, linewidth=0.4)
+        grid, aligned = align_traces(tr, t_pre, t_post)
+        mean, lo, hi = mean_band(aligned, clean.participant.to_numpy())
+        ax.fill_between(grid, lo, hi, color="k", alpha=0.3, linewidth=0)
         ax.plot(grid, mean, "k-", linewidth=1.5)
+        draw_windows(ax)
     axs[0].set_ylabel("Pupil diameter (mm)")
     axs[1].set_ylabel("Pupil size change (mm)")
     axs[2].set_ylabel("Gaze shift (deg)")
@@ -255,31 +287,55 @@ def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
     for ax in axs:
         ax.grid(True)
-        ax.set_xlim(-t_pre - 50, t_post + 50)  # [ms] margin: the outer windows end at the data span
+        ax.set_xlim(-t_pre - margin, t_post + margin)
     save_figure(fig, "fig14_luminance_change")
 
 
 def fig15(clean, fit):
-    """Apparent gaze shift against pupil constriction, every clean episode-eye, with the mixed
-    model's fixed-effect line (the two eyes averaged) and its 95% CI. The x axis starts at 0, as in
-    the paper, so the few dilating episode-eyes (x < 0) are fitted but not shown."""
-    fig, ax = plt.subplots(figsize=(5, 5))
-    ax.scatter(clean.pupil_change, clean["shift"], s=12, alpha=0.6)
-    x = np.linspace(0, 2.30, 50)
-    cols = {"Intercept": np.ones_like(x), "eye[T.right]": np.full_like(x, 0.5), "pupil_change": x}
+    """Left (H1): per participant, the mean apparent gaze shift across the luminance change against
+    the no-change control, with the identity line. Right (H2): the shift against pupil
+    constriction, every clean episode-eye, with the mixed model's fixed-effect line (the two eyes
+    averaged) and its 95% CI; dashed: the median accuracy of the grid task (Table 1, unweighted)."""
+    fx = pd.read_csv(data_path("1_accuracy", "fixations.csv"))
+    accuracy = pooled_median(fx[fx.is_fixation_valid == 1], "accuracy_centroid_deg")
+    pm = clean.groupby("participant")[["shift", "shift_control"]].mean()
+    print(f"Fig 15: {(pm['shift'] > pm.shift_control).sum()}/{len(pm)} participants above the identity line; "
+          f"median grid accuracy {accuracy:.3f} deg")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 5), layout="constrained")
+
+    a1.scatter(pm.shift_control, pm["shift"], s=16, color="k", alpha=0.6)
+    lim = 1.05 * pm.max().max()
+    a1.plot([0, lim], [0, lim], "k--", linewidth=1)
+    a1.set_xlim(0, lim)
+    a1.set_ylim(0, lim)
+    a1.set_aspect("equal")
+    a1.set_xlabel("Control gaze shift (deg)")
+    a1.set_ylabel("Apparent gaze shift (deg)")
+
+    a2.scatter(clean.pupil_change_control, clean.shift_control, s=12, facecolors="none", edgecolors="k",
+               linewidths=0.6, alpha=0.6)
+    a2.scatter(clean.pupil_change, clean["shift"], s=12, color="k", alpha=0.5)
     names = list(fit.fe_params.index)
-    X = np.column_stack([cols[n] for n in names])
-    y = X @ fit.fe_params.to_numpy()
-    se = np.sqrt(np.einsum("ij,jk,ik->i", X, fit.cov_params().loc[names, names].to_numpy(), X))
-    ax.plot(x, y, "k-")
-    ax.fill_between(x, y - 1.96 * se, y + 1.96 * se, color="k", alpha=0.15, linewidth=0)
-    hidden = clean[clean.pupil_change < 0]
-    print(f"Fig 15: {len(hidden)} episode-eyes with dilation (x < 0) are in the fit but outside the plot")
-    ax.set_xlabel("Pupil Size Change (mm)")
-    ax.set_ylabel("Apparent Gaze Shift (deg)")
-    ax.set_xlim(0, 2.30)
-    ax.set_ylim(bottom=-0.02)
-    ax.grid()
+
+    def model_line(x):
+        cols = {"Intercept": np.ones_like(x), "eye[T.right]": np.full_like(x, 0.5), "pupil_change": x}
+        X = np.column_stack([cols[n] for n in names])
+        se = np.sqrt(np.einsum("ij,jk,ik->i", X, fit.cov_params().loc[names, names].to_numpy(), X))
+        return X @ fit.fe_params.to_numpy(), se
+
+    x = np.linspace(clean.pupil_change.min(), clean.pupil_change.max(), 50)
+    y, se = model_line(x)
+    a2.plot(x, y, "k-")
+    a2.fill_between(x, y - 1.96 * se, y + 1.96 * se, color="k", alpha=0.15, linewidth=0)
+    # extrapolated to the control's pupil change, which is not in the fit
+    x = np.linspace(clean.pupil_change_control.min(), clean.pupil_change.min(), 50)
+    a2.plot(x, model_line(x)[0], "k:")
+    a2.axhline(accuracy, color="k", linestyle="--", linewidth=1)
+    a2.set_xlabel("Pupil constriction (mm)")
+    a2.set_ylabel("Apparent gaze shift (deg)")
+    a2.set_ylim(bottom=-0.02)
+    for ax in (a1, a2):
+        ax.grid(True)
     save_figure(fig, "fig15_shift_vs_constriction")
 
 

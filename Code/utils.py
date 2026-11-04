@@ -196,17 +196,17 @@ def inverse_weights(df, metric, cell, min_in_cell, region=None, x="stimulus_head
 # ---------------------------------------------------------------------------- time series
 
 
-def mean_trace(traces, t_pre, t_post):
-    """NaN-aware mean of per-episode time series on a common grid.
+def align_traces(traces, t_pre, t_post):
+    """Per-episode time series on a common grid, shape (grid, traces).
 
     Each trace is resampled onto the grid by nearest-sample lookup within one sample period, so
-    gaps stay gaps, then averaged column-wise skipping NaN. Returns (grid, mean, coverage).
+    gaps stay gaps (NaN). Returns (grid, aligned).
     """
     traces = [t[~t.index.duplicated()] for t in traces]
     step = float(np.median([np.median(np.diff(t.index)) for t in traces]))
     grid = np.arange(-t_pre, t_post + step, step)
-    aligned = pd.concat([t.reindex(grid, method="nearest", tolerance=step) for t in traces], axis=1)
-    return grid, aligned.mean(axis=1), aligned.count(axis=1)
+    aligned = np.column_stack([t.reindex(grid, method="nearest", tolerance=step).to_numpy() for t in traces])
+    return grid, aligned
 
 
 def blank(df, mask_col="blink"):
