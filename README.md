@@ -8,7 +8,7 @@ This repository contains the data and analysis code for the paper:
 
 The paper is currently in review, and the details will be updated here if and when it is published.
 
-The scripts in `Code/` reproduce the paper's Figures 4–15, Table 1, and the statistics quoted in
+The scripts in `Code/` reproduce the paper's Figures 7–18, Table 1, and the statistics quoted in
 the Results from the data in `Data/`.
 
 ## Repository Structure
@@ -16,9 +16,9 @@ the Results from the data in `Data/`.
 ```text
 .
 ├── Code/                   # Analysis and plotting scripts
-│   ├── analyse_accuracy.py    # Grid fixation: Figs 4-9, Table 1
-│   ├── analyse_luminance.py   # Background luminance change: Figs 10-12
-│   ├── analyse_vergence.py    # Visual search: Figs 13-15
+│   ├── analyse_accuracy.py    # Grid fixation: Figs 7-12, Table 1
+│   ├── analyse_luminance.py   # Background luminance change: Figs 13-15
+│   ├── analyse_vergence.py    # Visual search: Figs 16-18
 │   ├── participant_table.py   # Per-participant supplementary table
 │   └── utils.py
 ├── Data/
@@ -58,10 +58,10 @@ participant did not take part in that experiment.
 * `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks (`Tables/kappa_blocks.*`)
 * `n_fixations`, `n_fixations_valid`: all fixations, and the valid ones (`is_fixation_valid`)
 * `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
-* `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 8–9; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
+* `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 11–12; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
 * `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink between −1,300 and 1,500 ms (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
 * `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
-* `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 15)
+* `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 18)
 * `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable
 
 `Tables/kappa_blocks.csv` / `.md`, written by the same script, give kappa per participant, eye, recording and
@@ -104,7 +104,7 @@ stalled repeatedly and skipped 14 of the 61 targets.
 * `participant_in_training_set`: `True` if other recordings of this participant were in the limbus model's training set
 
 **`{participant}_{recording}_{grid}_{eye}.csv`** — per-frame data for the two example recordings
-(`p038` for Fig. 4, `p042` for Fig. 5), covering whole fixation periods:
+(`p038` for Fig. 7, `p042` for Fig. 8), covering whole fixation periods:
 
 * `timestamp_sec`, `fixation`, `stimulus_monitor_{x|y}_deg`
 * `stimulus_dir_{x|y|z}`, `optical_axis_{x|y|z}`, `visual_axis_{x|y|z}`: unit vectors in the head frame (target direction from the limbus centre; measured gaze before and after the kappa correction)

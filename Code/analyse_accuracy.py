@@ -1,4 +1,4 @@
-"""Grid fixation task: paper Figures 4-9 and Table 1, plus the numbers quoted with them.
+"""Grid fixation task: paper Figures 7-12 and Table 1, plus the numbers quoted with them.
 
 Reads Data/1_accuracy/. Run from anywhere:  python Code/analyse_accuracy.py [--show]
 """
@@ -23,8 +23,8 @@ METRICS = {"accuracy_centroid_deg": ("Accuracy", 1.0), "precision_rms_s2s_deg": 
 TABLE1 = {**METRICS, "precision_std_deg": ("Precision (SD)", None)}  # Table 1 only; figures use METRICS
 X, Y = "stimulus_head_x_deg", "stimulus_head_y_deg"
 
-FIG4 = ("p038_grid_1_grid1", range(11, 25))  # recording, fixations shown
-FIG5 = "p042_grid_1_grid2"
+FIG7 = ("p038_grid_1_grid1", range(11, 25))  # recording, fixations shown
+FIG8 = "p042_grid_1_grid2"
 
 
 def cells(df, col):
@@ -53,7 +53,7 @@ def print_counts(df):
 
 def table1(edata, n_all):
     """Table 1: pooled medians, unweighted and inverse-density-weighted. Also returns the U|E
-    tables behind Figs 8 and 9."""
+    tables behind Figs 11 and 12."""
     rows, ue = {}, {}
     for metric, (name, _) in TABLE1.items():
         whole = inverse_weights(edata, metric, CELL, MIN_IN_CELL)
@@ -103,11 +103,11 @@ def table1_by_training(edata):
 # ---------------------------------------------------------------------------- figures
 
 
-def fig4():
+def fig7():
     """Timeline of gaze (left eye blue, right eye red) and of the stimulus as seen from each eye
     (black: solid left, dashed right) in the head frame, whole fixations with blinks left in.
     Angles of the negated vectors, as in the original figure."""
-    rec, fixations = FIG4
+    rec, fixations = FIG7
     fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
     lims = [[np.inf, -np.inf], [np.inf, -np.inf]]
     for eye, color, style in (("left", "tab:blue", "-"), ("right", "tab:red", "--")):
@@ -131,17 +131,17 @@ def fig4():
     axs[0].set_ylabel("Azimuth (deg)")
     axs[1].set_ylabel("Elevation (deg)")
     axs[1].set_xlabel("Time (sec)")
-    save_figure(fig, "fig04_timeline")
+    save_figure(fig, "fig07_timeline")
 
 
-def fig5(df):
+def fig8(df):
     """Optical (top) and visual (bottom) axis per frame around each grid target, both eyes;
     analysis-window frames without blinks, as the accuracy numbers use. Targets: filled and open
     circles are the two checkerboard halves, each corrected with the other's kappa; x is invalid."""
-    pid, rec, grid = FIG5.split("_", 1)[0], "_".join(FIG5.split("_")[1:3]), FIG5.split("_")[-1]
+    pid, rec, grid = FIG8.split("_", 1)[0], "_".join(FIG8.split("_")[1:3]), FIG8.split("_")[-1]
     fig, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True, sharey=True)
     for col, eye in enumerate(["left", "right"]):
-        d = pd.read_csv(data_path("1_accuracy", f"{FIG5}_{eye}.csv"))
+        d = pd.read_csv(data_path("1_accuracy", f"{FIG8}_{eye}.csv"))
         d = d[d.in_analysis_window & ~d.blink]
         fx = df[(df.participant == pid) & (df.recording == rec) & (df.grid == grid) & (df.eye == eye)]
         fx = fx.set_index("fixation")
@@ -162,7 +162,7 @@ def fig5(df):
         kx, ky = fx.kappa_grid_x_deg.iloc[0], fx.kappa_grid_y_deg.iloc[0]
         halves = fx.groupby("kappa_half")[["kappa_x_deg", "kappa_y_deg"]].first()
         axs[0, col].set_title(f"{eye} eye, kappa {kx:.2f} by {ky:.2f} deg")
-        print(f"Fig 5 {eye} eye kappa: {kx:.2f} by {ky:.2f} deg; applied per half: "
+        print(f"Fig 8 {eye} eye kappa: {kx:.2f} by {ky:.2f} deg; applied per half: "
               + ", ".join(f"{h}: {r.kappa_x_deg:.2f} by {r.kappa_y_deg:.2f}" for h, r in halves.iterrows()))
     ticks = np.arange(-21, 22, 3)
     for ax in axs.flat:
@@ -176,10 +176,10 @@ def fig5(df):
     for ax in axs[1]:
         ax.set_xlabel("Eccentricity horizontal (deg)")
     fig.tight_layout()
-    save_figure(fig, "fig05_grid")
+    save_figure(fig, "fig08_grid")
 
 
-def fig6(edata):
+def fig9(edata):
     """Fixation positions in the head frame, and fixation counts per cell."""
     fig, axs = plt.subplots(1, 2, figsize=(18, 7))
     bx, by = cells(edata, X), cells(edata, Y)
@@ -198,10 +198,10 @@ def fig6(edata):
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
     fig.tight_layout()
-    save_figure(fig, "fig06_fixation_distribution")
+    save_figure(fig, "fig09_fixation_distribution")
 
 
-def fig7(edata):
+def fig10(edata):
     """Median accuracy (top) and precision (bottom) per cell."""
     fig, axs = plt.subplots(2, 1, figsize=(11, 14))
     for ax, (metric, (name, vmax)) in zip(axs, METRICS.items()):
@@ -213,7 +213,7 @@ def fig7(edata):
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
     fig.tight_layout()
-    save_figure(fig, "fig07_quality_by_cell")
+    save_figure(fig, "fig10_quality_by_cell")
 
 
 def fig_ue(ue, region, name):
@@ -238,12 +238,12 @@ def main():
     ue = table1(edata, len(df))
     table1_by_training(edata)
 
-    fig4()
-    fig5(df)
-    fig6(edata)
-    fig7(edata)
-    fig_ue(ue, "whole", "fig08_ue_whole_fov")
-    fig_ue(ue, "central", "fig09_ue_central_fov")
+    fig7()
+    fig8(df)
+    fig9(edata)
+    fig10(edata)
+    fig_ue(ue, "whole", "fig11_ue_whole_fov")
+    fig_ue(ue, "central", "fig12_ue_central_fov")
     if args.show:
         plt.show()
 

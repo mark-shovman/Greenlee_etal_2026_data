@@ -208,7 +208,7 @@ def main():
     assert t.vs_pairs_testable.sum() == pairs.p.notna().sum()
     print(f"{len(t)} participants: {t.n_fixations.notna().sum()} grid, {t.lum_constriction_mm.notna().sum()} "
           f"with valid luminance episodes, {t.vs_runs.notna().sum()} vergence")
-    print("U50 over the per-participant weighted medians (= U50|E50 in Figs 8-9): "
+    print("U50 over the per-participant weighted medians (= U50|E50 in Figs 11-12): "
           + ", ".join(f"{k} {v:.3f}" for k, v in ue50.items()))
     print(f"Decoding mean: within {t.vs_decoding_within.mean():.3f}, cross {t.vs_decoding_cross.mean():.3f}; "
           f"pairs discriminated {t.vs_pairs_discriminated.sum():.0f}/{t.vs_pairs_testable.sum():.0f}")

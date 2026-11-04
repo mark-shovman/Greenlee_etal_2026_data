@@ -1,4 +1,4 @@
-"""Visual search task: paper Figures 13-15, the pairwise discriminability tests and the
+"""Visual search task: paper Figures 16-18, the pairwise discriminability tests and the
 leave-one-out depth decoding, with the numbers quoted with them.
 
 Reads Data/3_vergence/. Run from anywhere:  python Code/analyse_vergence.py [--show]
@@ -20,7 +20,7 @@ N_DEPTHS = 6
 MIN_FIXATION_DURATION = 1.0  # [s] a reference fixation must last this long
 FIXATION_START_OFFSET = 0.3  # [s] skipped at the start of the reference fixation
 ALPHA = 0.001  # adjusted p below which a pair of depths counts as discriminated
-FIG13 = [("p057", "vergence_3"), ("p023", "vergence_3")]  # average and poor discriminability
+FIG16 = [("p057", "vergence_3"), ("p023", "vergence_3")]  # average and poor discriminability
 
 
 def load():
@@ -176,12 +176,12 @@ def print_decoding(results):
 # ---------------------------------------------------------------------------- figures
 
 
-def fig13(s, fixations, raw, clean):
+def fig16(s, fixations, raw, clean):
     """Two runs end to end: gaze azimuth and elevation per eye (faint: before blink removal),
     binocular fixations (cyan), instantaneous vergence distance (grey) and each stimulus's
     vergence over its reference fixation (black)."""
     fig, all_axs = plt.subplots(3, 2, figsize=(16, 8))
-    for col, (pid, rec) in enumerate(FIG13):
+    for col, (pid, rec) in enumerate(FIG16):
         axs = all_axs[:, col]
         for eye in EYES:
             c = EYE_COLORS[eye]
@@ -216,10 +216,10 @@ def fig13(s, fixations, raw, clean):
         axs[2].set_xlabel("Time (s)")
         axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.1f}"))
     fig.tight_layout()
-    save_figure(fig, "fig13_example_runs")
+    save_figure(fig, "fig16_example_runs")
 
 
-def fig14(valid):
+def fig17(valid):
     fig = plt.figure()
     sns.boxplot(y="vd_mm", x="order_from_participant", color="lightgreen", data=valid,
                 fliersize=0, showcaps=False)
@@ -234,10 +234,10 @@ def fig14(valid):
     plt.xlabel("Depth Order from Participant")
     plt.ylim(-200, 800)
     plt.tight_layout()
-    save_figure(fig, "fig14_vergence_by_depth")
+    save_figure(fig, "fig17_vergence_by_depth")
 
 
-def fig15(results):
+def fig18(results):
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
     for ax, (scope, (acc, confusion)) in zip(axs, results.items()):
         sns.heatmap(confusion.div(confusion.sum(axis=1), axis=0), annot=True, fmt=".2f", cmap="Greens",
@@ -246,7 +246,7 @@ def fig15(results):
         ax.set_xlabel("Decoded Depth Order from Participant")
         ax.set_ylabel("True Depth Order from Participant")
     fig.tight_layout()
-    save_figure(fig, "fig15_decoding_confusion")
+    save_figure(fig, "fig18_decoding_confusion")
 
 
 def prepare():
@@ -274,9 +274,9 @@ def main():
     results = {scope: decode_depths(valid, scope) for scope in ("within", "cross")}
     print_decoding(results)
 
-    fig13(s, fixations, raw, clean)
-    fig14(valid)
-    fig15(results)
+    fig16(s, fixations, raw, clean)
+    fig17(valid)
+    fig18(results)
     if args.show:
         plt.show()
 

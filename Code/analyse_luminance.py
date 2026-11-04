@@ -1,4 +1,4 @@
-"""Background luminance change task: paper Figures 10-12 and the numbers quoted with them.
+"""Background luminance change task: paper Figures 13-15 and the numbers quoted with them.
 
 Reads Data/2_luminance/. Run from anywhere:  python Code/analyse_luminance.py [--show]
 """
@@ -23,7 +23,7 @@ CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target
 # [ms] a saccade or blink here can move gaze between the windows of either shift (control start
 # to recovery end); events outside it cannot, and do not exclude the episode
 EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
-FIG10 = "p011"
+FIG13 = "p011"
 N_BOOT = 10000  # participant-level bootstrap resamples
 SEED = 1
 
@@ -173,16 +173,16 @@ def print_bootstrap(clean):
 # ---------------------------------------------------------------------------- figures
 
 
-def fig10(protocol, ep, series):
+def fig13(protocol, ep, series):
     """One participant end to end: stimulus, gaze relative to its first sample, pupil."""
-    p = protocol[protocol.participant == FIG10]
+    p = protocol[protocol.participant == FIG13]
     t0 = p.t_start_sec.iloc[0]
     fig, axs = plt.subplots(3, 1, sharex=True)
     # the protocol's Y runs the opposite way to gaze elevation, hence the sign
     for sign, col, ax in zip((1, -1), ["stimulus_x_deg", "stimulus_y_deg"], axs):
         ax.step((p.t_start_sec - t0) / MS, sign * p[col], where="post", color="k")
     for eye in EYES:
-        d = series[(FIG10, eye)]
+        d = series[(FIG13, eye)]
         gd = d[["azimuth_deg", "elevation_deg"]]
         gd = gd - gd.iloc[0]
         t = (d.index - t0) / MS
@@ -194,7 +194,7 @@ def fig10(protocol, ep, series):
         ax.set_facecolor("gray")
         ax.set_xlim(0, 32000)
         ax.grid(True)
-        for _, r in ep[ep.participant == FIG10].iterrows():
+        for _, r in ep[ep.participant == FIG13].iterrows():
             ax.axvline((r.t_start - t0) / MS, linestyle="--", color="k")
             ax.axvspan((r.t_change - t0) / MS, (r.t_end - t0) / MS, fc="white", alpha=1)
     axs[0].set_ylabel("Azimuth (deg)")
@@ -202,10 +202,10 @@ def fig10(protocol, ep, series):
     axs[2].set_ylabel("Pupil diameter (mm)")
     axs[2].set_xlabel("Time (msec)")
     axs[2].xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
-    save_figure(fig, "fig10_example_participant")
+    save_figure(fig, "fig13_example_participant")
 
 
-def fig11(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
+def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     """Pupil diameter, its change, and gaze shift around the change, every clean episode-eye;
     black: the mean trace. Baselines: the baseline window. Dark background shaded; the control,
     baseline and recovery windows between dashed lines."""
@@ -248,10 +248,10 @@ def fig11(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
     for ax in axs:
         ax.grid(True)
         ax.set_xlim(-t_pre, t_post)
-    save_figure(fig, "fig11_luminance_change")
+    save_figure(fig, "fig14_luminance_change")
 
 
-def fig12(clean, fit):
+def fig15(clean, fit):
     """Apparent gaze shift against pupil constriction, every clean episode-eye, with the mixed
     model's fixed-effect line (the two eyes averaged) and its 95% CI. The x axis starts at 0, as in
     the paper, so the few dilating episode-eyes (x < 0) are fitted but not shown."""
@@ -266,13 +266,13 @@ def fig12(clean, fit):
     ax.plot(x, y, "k-")
     ax.fill_between(x, y - 1.96 * se, y + 1.96 * se, color="k", alpha=0.15, linewidth=0)
     hidden = clean[clean.pupil_change < 0]
-    print(f"Fig 12: {len(hidden)} episode-eyes with dilation (x < 0) are in the fit but outside the plot")
+    print(f"Fig 15: {len(hidden)} episode-eyes with dilation (x < 0) are in the fit but outside the plot")
     ax.set_xlabel("Pupil Size Change (mm)")
     ax.set_ylabel("Apparent Gaze Shift (deg)")
     ax.set_xlim(0, 2.30)
     ax.set_ylim(bottom=-0.02)
     ax.grid()
-    save_figure(fig, "fig12_shift_vs_constriction")
+    save_figure(fig, "fig15_shift_vs_constriction")
 
 
 def main():
@@ -293,9 +293,9 @@ def main():
     print_mixed_model(metrics)
     print_control(metrics)
 
-    fig10(protocol, ep, series)
-    fig11(ep, clean, series)
-    fig12(clean, fit)
+    fig13(protocol, ep, series)
+    fig14(ep, clean, series)
+    fig15(clean, fit)
     if args.show:
         plt.show()
 
