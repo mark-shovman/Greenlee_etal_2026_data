@@ -143,11 +143,13 @@ own file and timestamps.
 * `icX`, `icY`, `icZ`: limbus centre position
 * `igX`, `igY`, `igZ`: gaze direction, a unit vector; by convention it points *into* the eye
 * `azimuth_deg`, `elevation_deg`: the gaze as angles
+* `ffzX`, `ffzY`, `ffzZ`: the forward (optical) axis of this eye's front camera, a unit vector; it moves with the
+  head. Empty where the marker was not tracked
 * `blink`: the sample lies in a detected blink; the analyses treat it as missing
 
-**`stimuli.csv`** — the six symbols of each run: `participant`, `recording`, `symbol_set`,
-`symbol`, `order_from_participant` (1: closest, 6: farthest), `t_start_sec`, `t_end_sec` (when the
-symbol was called out).
+**`stimuli.csv`** — the six symbols of each run: `participant`, `recording`, `rig` (the setup, `A` or `B`; its symbol
+positions are in `analyse_vergence.py`), `symbol_set`, `symbol`, `order_from_participant`
+(1: closest, 6: farthest), `t_start_sec`, `t_end_sec` (when the symbol was called out).
 
 **`fixations.csv`** — binocular fixations (both eyes fixating, detected by I-VT per eye):
 `participant`, `recording`, `t_start_sec`, `t_end_sec`. The reference fixation for each symbol is
