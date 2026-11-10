@@ -1,5 +1,7 @@
-"""Visual search task: paper Figures 16-18, the pairwise discriminability tests and the
-leave-one-out depth decoding, with the numbers quoted with them.
+"""Visual search task: paper Figures 16-17 and the numbers quoted with them. In the marker frame, where the symbols
+stand still: the repeated-measures ANOVA on the participants' mean vergence point distance in front of the marker per
+depth order, with Holm-corrected comparisons of adjacent depths. On distance from the head (Figs 16-17): the error of
+the vergence point against the symbol.
 
 Reads Data/3_vergence/. Run from anywhere:  python Code/analyse_vergence.py [--show]
 """
@@ -9,17 +11,24 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
-from utils import (EYE_COLORS, EYES, IC, IG, blank, calculate_vergence_point, data_path, finish_timeline,
-                   read_series, save_figure, timeline_figure, vergence_distance)
+from utils import (EYE_COLORS, EYES, IC, IG, blank, data_path, finish_timeline, read_series, save_figure,
+                   timeline_figure, vergence_point)
 
 N_DEPTHS = 6
 MIN_FIXATION_DURATION = 1.0  # [s] a reference fixation must last this long
 FIXATION_START_OFFSET = 0.3  # [s] skipped at the start of the reference fixation
-ALPHA = 0.001  # adjusted p below which a pair of depths counts as discriminated
-FIG16 = [("p057", "vergence_3"), ("p023", "vergence_3")]  # average and poor discriminability
+# Symbol positions per rig (stimuli.csv), by order_from_participant 1-6: (x, y, z) [mm] in the marker frame (x right,
+# y down, z away from the participant), the letter on the face towards the participant. From the scene-camera stereo
+# pairs: median over the runs where all six were found (58 rig A, 15 rig B); runs scatter ~1 mm around them.
+SYMBOLS = {
+    "A": ((-8, 92, -339), (-8, 91, -285), (-9, 91, -229), (-8, 90, -175), (-9, 90, -119), (-10, 89, -63)),
+    "B": ((-7, 96, -397), (-6, 92, -343), (-8, 92, -288), (-8, 94, -233), (-7, 93, -176), (-9, 90, -120)),
+}
+FIG16 = ("p057", "vergence_3")  # the example run: participant, recording
+FFZ = [f"ffz{x}" for x in "XYZ"]  # forward axis of the eye's front camera, a unit vector
 
 
 def load():
@@ -59,192 +68,187 @@ def reference_fixations(stimuli, fixations):
     return s
 
 
+def head_distance(v, p):
+    """Distance [mm] of the points p (N, 3) from the head, along its forward axis, per stimulus row of v."""
+    head = v[["head_x", "head_y", "head_z"]].to_numpy()
+    fwd = v[["fwd_x", "fwd_y", "fwd_z"]].to_numpy()
+    return np.einsum("ij,ij->i", p - head, fwd)
+
+
 def stimulus_vergence(s, clean):
-    """Vergence per stimulus from the mean eye positions and gaze over its reference fixation
-    (first 300 ms skipped): the isosceles-triangle distance, and the least-squares vergence
-    point, whose z is measured from the marker."""
+    """Vergence per stimulus, from the mean limbus centres and gaze over its reference fixation (first 300 ms
+    skipped); gaze points into the eye, so the rays run along -ig. The head over the same window: the midpoint of the
+    limbus centres, and the mean of the two front cameras' forward axes. vergence_mm and symbol_mm: the vergence
+    point's and the symbol's distance from the head, along its forward axis. marker_mm and symbol_marker_mm: their
+    distance in front of the marker, towards the participant."""
     for i, r in s.iterrows():
         if np.isnan(r.t_fix_start):
             continue
-        gd, ic = {}, {}
+        gd, ic, fz = {}, {}, {}
         for eye in EYES:
             w = clean[(r.participant, r.recording, eye)].loc[r.t_fix_start_offset:r.t_fix_end]
             g = w[IG].mean()
             gd[eye] = (g / np.linalg.norm(g)).values
             ic[eye] = w[IC].mean().values
-        s.loc[i, "vergence_distance"] = vergence_distance(ic["left"], gd["left"], ic["right"], gd["right"])[0]
-        s.loc[i, ["vp_x", "vp_y", "vp_z"]] = calculate_vergence_point(ic["left"], -gd["left"],
-                                                                      ic["right"], -gd["right"])
-    s["vd_mm"] = -s.vp_z  # distance in front of the marker, towards the participant
+            fz[eye] = w[FFZ].mean().values
+        s.loc[i, ["vp_x", "vp_y", "vp_z"]] = vergence_point(ic["left"], -gd["left"], ic["right"], -gd["right"])[0]
+        s.loc[i, ["head_x", "head_y", "head_z"]] = (ic["left"] + ic["right"]) / 2
+        f = fz["left"] + fz["right"]
+        s.loc[i, ["fwd_x", "fwd_y", "fwd_z"]] = f / np.linalg.norm(f)
+    symbols = np.array([SYMBOLS[r][k - 1] for r, k in zip(s.rig, s.order_from_participant)], float)
+    s["vergence_mm"] = head_distance(s, s[["vp_x", "vp_y", "vp_z"]].to_numpy())
+    s["symbol_mm"] = head_distance(s, symbols)
+    s["marker_mm"] = -s.vp_z
+    s["symbol_marker_mm"] = -symbols[:, 2]
     return s
 
 
-def angle_vergence_series(clean, pid, rec):
+def vergence_series(clean, pid, rec):
+    """Per sample, the vergence point's distance from the head (mm), as in Fig 17: along the mean of the
+    two front cameras' forward axes, from the midpoint of the limbus centres; on the right eye's
+    timeline; for display (Fig 16) only."""
     left, right = paired_eyes(clean, pid, rec)
-    return pd.Series(vergence_distance(left[IC].values, left[IG].values, right[IC].values, right[IG].values),
-                     index=right.index)
+    p = vergence_point(left[IC].values, -left[IG].values, right[IC].values, -right[IG].values)
+    head = (left[IC].values + right[IC].values) / 2
+    fwd = left[FFZ].values + right[FFZ].values
+    fwd /= np.linalg.norm(fwd, axis=1)[:, None]
+    return pd.Series(np.einsum("ij,ij->i", p - head, fwd), index=right.index)
 
 
-def discriminability(s, clean):
-    """Per run, an independent t-test between the instantaneous vergence distances of each
-    two adjacent depths, over their reference fixations; Bonferroni over all valid tests."""
+# ---------------------------------------------------------------------------- repeated-measures ANOVA
+
+
+def participant_means(v, col="marker_mm"):
+    """Mean of col per participant and depth order, for the participants with an estimate at every
+    depth: participants x depths."""
+    return v.groupby(["participant", "order_from_participant"])[col].mean().unstack().dropna()
+
+
+def rm_anova(m):
+    """One-way repeated-measures ANOVA on participants x levels, with Mauchly's test of sphericity
+    and the Greenhouse-Geisser correction. Returns a dict of the statistics."""
+    y = m.to_numpy()
+    n, k = y.shape
+    grand = y.mean()
+    ss_level = n * ((y.mean(0) - grand) ** 2).sum()
+    ss_subject = k * ((y.mean(1) - grand) ** 2).sum()
+    ss_error = ((y - grand) ** 2).sum() - ss_level - ss_subject
+    df1, df2 = k - 1, (k - 1) * (n - 1)
+    f = (ss_level / df1) / (ss_error / df2)
+    # sphericity, on the covariance of k - 1 orthonormal contrasts
+    c = np.linalg.qr(np.vstack([np.ones(k), np.eye(k)[:-1]]).T)[0][:, 1:]
+    s = np.cov(y @ c, rowvar=False)
+    pp = k - 1
+    w = np.linalg.det(s) / (np.trace(s) / pp) ** pp
+    chi2 = -(n - 1 - (2 * pp ** 2 + pp + 2) / (6 * pp)) * np.log(w)
+    eps = np.trace(s) ** 2 / (pp * np.trace(s @ s))
+    return dict(n=n, k=k, F=f, df1=df1, df2=df2, p=stats.f.sf(f, df1, df2), eta_p2=ss_level / (ss_level + ss_error),
+                mauchly_W=w, mauchly_p=stats.chi2.sf(chi2, pp * (pp + 1) / 2 - 1), gg_eps=eps,
+                gg_p=stats.f.sf(f, eps * df1, eps * df2))
+
+
+def print_anova(v):
+    """Depth order on the participants' mean vergence point distance in front of the marker (averaged over runs; the
+    symbols stand still in the marker frame): repeated-measures ANOVA; adjacent depths by paired t-tests,
+    Holm-corrected, the step set against the symbols' own step."""
+    m = participant_means(v)
+    sym = participant_means(v, "symbol_marker_mm").loc[m.index]
+    a = rm_anova(m)
+    print(f"Repeated-measures ANOVA over {a['n']} participants' mean distance in front of the marker per depth: "
+          f"F({a['df1']}, {a['df2']}) = {a['F']:.2f}, p = {a['p']:.1e}, partial eta^2 = {a['eta_p2']:.2f}; "
+          f"Mauchly W = {a['mauchly_W']:.3f}, p = {a['mauchly_p']:.1e}; Greenhouse-Geisser epsilon "
+          f"{a['gg_eps']:.3f}: F({a['gg_eps'] * a['df1']:.2f}, {a['gg_eps'] * a['df2']:.2f}) = {a['F']:.2f}, "
+          f"p = {a['gg_p']:.1e}")
     rows = []
-    for (pid, rec), g in s.groupby(["participant", "recording"], sort=False):
-        va = angle_vergence_series(clean, pid, rec)
-        g = g.set_index("order_from_participant")
-        for order in range(1, N_DEPTHS):
-            samples = []
-            for o in (order, order + 1):
-                r = g.loc[o]
-                samples.append(va[r.t_fix_start_offset:r.t_fix_end].dropna()
-                               if not np.isnan(r.t_fix_start) else va.iloc[:0])
-            g1, g2 = samples
-            p = stats.ttest_ind(g1, g2).pvalue if len(g1) and len(g2) else np.nan
-            rows.append((pid, rec, order, len(g1), len(g2), p))
-    d = pd.DataFrame(rows, columns=["participant", "recording", "pair", "n1", "n2", "p"])
-    n_valid = d.p.notna().sum()
-    d["p_adj"] = np.minimum(d.p * n_valid, 1.0)
-    return d
+    for k in range(1, N_DEPTHS):
+        d = m[k] - m[k + 1]  # nearer minus farther, in front of the marker: positive when ordered correctly
+        t, p = stats.ttest_1samp(d, 0)
+        rows.append((k, d.mean(), (sym[k] - sym[k + 1]).mean(), d.mean() / d.std(), t, p, (d > 0).sum()))
+    holm = multipletests([r[5] for r in rows], method="holm")[1]
+    print(f"Adjacent depths, paired t-tests over the {len(m)} participants' means, Holm-corrected:")
+    for (k, step, true, dz, t, p, right), ph in zip(rows, holm):
+        print(f"  depth {k} to {k + 1}: step {step:.1f} mm (symbols {true:.1f} mm), dz = {dz:.2f}, "
+              f"t({len(m) - 1}) = {t:.2f}, p_Holm = {ph:.1e}; correct sign in {right}/{len(m)}")
 
 
-def print_discriminability(d):
-    n_valid = d.p.notna().sum()
-    print(f"{len(d)} adjacent pairs, {n_valid} testable (Bonferroni factor {n_valid}); "
-          f"{(d.p_adj < ALPHA).sum()} ({100 * (d.p_adj < ALPHA).sum() / n_valid:.0f}%) discriminated at "
-          f"p_adj < {ALPHA}")
-    per_run = d.groupby(["participant", "recording"]).agg(valid=("p", "count"), worst=("p_adj", "max"))
-    complete = per_run[per_run.valid == N_DEPTHS - 1]
-    print(f"{len(per_run)} runs, {len(complete)} with all {N_DEPTHS - 1} pairs valid; in "
-          f"{(complete.worst < ALPHA).sum()} ({100 * (complete.worst < ALPHA).sum() / len(per_run):.0f}% of all runs) "
-          f"every adjacent pair is discriminated at p_adj < {ALPHA}")
-    n = pd.concat([d.n1, d.n2])
-    n = n[n > 0]
-    print(f"Samples per reference fixation in the t-tests: {n.min()}-{n.max()}, median {n.median():.0f}")
-
-
-def decode_depths(df, scope):
-    """Nearest-centroid decoding of depth order from one vergence estimate (vd_mm), leave-one-out:
-    'within' - centroids from the participant's remaining stimuli; 'cross' - from all other
-    participants. Returns per-participant accuracy and the confusion counts [true, decoded]."""
-    depths = list(range(1, N_DEPTHS + 1))
-    rows, confusion = [], pd.DataFrame(0, index=depths, columns=depths)
-    df = df[df.vd_mm.notna()]
-    for pid, g in df.groupby("participant"):
-        if g.order_from_participant.nunique() < N_DEPTHS:
-            continue
-        others = None
-        if scope == "cross":
-            others = df[df.participant != pid].groupby("order_from_participant").vd_mm.mean()
-            if len(others) < N_DEPTHS:
-                continue
-        correct = total = 0
-        for i in g.index:
-            if scope == "within":
-                centroids = g.drop(i).groupby("order_from_participant").vd_mm.mean()
-                if len(centroids) < N_DEPTHS:
-                    continue  # holding this one out left a depth with no estimate
-            else:
-                centroids = others
-            true = int(g.at[i, "order_from_participant"])
-            pred = int((centroids - g.at[i, "vd_mm"]).abs().idxmin())
-            confusion.at[true, pred] += 1
-            correct += pred == true
-            total += 1
-        if total:
-            rows.append((pid, total, correct / total))
-    return pd.DataFrame(rows, columns=["participant", "n", "accuracy"]).set_index("participant"), confusion
-
-
-def print_decoding(results):
-    chance = 1 / N_DEPTHS
-    for scope, (acc, confusion) in results.items():
-        n = int(confusion.to_numpy().sum())
-        off = np.abs(np.subtract.outer(confusion.index, confusion.columns))
-        near = confusion.to_numpy()[off <= 1].sum()
-        t, p = stats.ttest_1samp(acc.accuracy, chance)
-        print(f"Decoding, {scope}: {len(acc)} participants, {n} stimuli; accuracy "
-              f"{acc.accuracy.mean():.3f} +/- {acc.accuracy.std():.3f} (mean +/- SD), median {acc.accuracy.median():.3f}; "
-              f"{(acc.accuracy > chance).sum()}/{len(acc)} above chance {chance:.3f}; "
-              f"t({len(acc) - 1}) = {t:.2f}, p = {p:.2e}; {100 * near / n:.1f}% correct or one depth off")
-    (a, _), (b, _) = results.values()
-    common = a.index.intersection(b.index)
-    t, p = stats.ttest_rel(a.accuracy[common], b.accuracy[common])
-    print(f"within vs cross, paired over {len(common)} participants: t({len(common) - 1}) = {t:.2f}, p = {p:.2e}")
+def print_error(v):
+    """Vergence point against the symbol, both as distance from the head: median and IQR of the difference."""
+    e = v.vergence_mm - v.symbol_mm
+    print("Vergence minus symbol distance from the head [mm], median (IQR): "
+          + "; ".join(f"{name} {g.median():.0f} ({g.quantile(.25):.0f} to {g.quantile(.75):.0f}), n = {len(g)}"
+                      for name, g in [("all", e)] + [(f"rig {r}", e[v.rig == r]) for r in sorted(v.rig.unique())]))
 
 
 # ---------------------------------------------------------------------------- figures
 
 
-def fig16(s, fixations, raw, clean):
-    """Two runs end to end: gaze azimuth and elevation per eye (faint: before blink removal),
-    binocular fixations (cyan), instantaneous vergence distance (grey) and each stimulus's
-    vergence over its reference fixation (black)."""
-    fig, all_axs = timeline_figure(3, 2)
-    span = [np.inf, -np.inf]  # [s] the shared time axis covers both runs
-    for col, (pid, rec) in enumerate(FIG16):
-        axs = all_axs[:, col]
-        g = s[(s.participant == pid) & (s.recording == rec)].sort_values("t_start_sec")
-        t0, t1 = g.t_start_sec.iloc[0], g.t_end_sec.iloc[-1]
-        for eye in EYES:
-            c = EYE_COLORS[eye]
-            for d, kw in ((raw[(pid, rec, eye)], dict(linewidth=0.3, alpha=0.1)), (clean[(pid, rec, eye)], {})):
-                axs[0].plot(d.index, d.azimuth_deg, color=c, **kw)
-                axs[1].plot(d.index, d.elevation_deg, color=c, **kw)
-        for _, f in fixations[(fixations.participant == pid) & (fixations.recording == rec)].iterrows():
-            for ax in axs:
-                ax.axvspan(f.t_start_sec, f.t_end_sec, color="cyan", alpha=0.2)
-        va = angle_vergence_series(clean, pid, rec) / 1000
-        axs[2].plot(va.index, va, c="k", alpha=0.3)
-        for _, r in g.dropna(subset=["vergence_distance"]).iterrows():
-            y = r.vergence_distance / 1000
-            axs[2].plot((r.t_fix_start_offset, r.t_fix_end), (y, y), color="k")
-            axs[2].text(r.t_fix_start_offset, y, f"[{r.symbol}]\n{y:.2f}", ha="right", va="center", weight="bold")
-        # scale to the blink-free data; the faint traces' blink artefacts run off the axes
-        for ax, col in zip(axs[:2], ["azimuth_deg", "elevation_deg"]):
-            v = pd.concat([clean[(pid, rec, eye)].loc[t0:t1, col] for eye in EYES])
-            ax.set_ylim(v.min() - 1, v.max() + 1)
-        axs[2].set_ylim(va.loc[t0:t1].quantile(.01) - 0.1, va.loc[t0:t1].quantile(.99) + 0.1)
-        span = [min(span[0], t0), max(span[1], t1)]
-        for ax in axs:
-            for t in list(g.t_start_sec) + [g.t_end_sec.iloc[-1]]:
-                ax.axvline(t, color="k", linestyle="--")
-        axs[0].set_title(f"{pid} {rec}")
-        axs[0].set_ylabel("Azimuth (deg)")
-        axs[1].set_ylabel("Elevation (deg)")
-        axs[2].set_ylabel("Vergence distance (m)")
-    all_axs[0, 0].set_xlim(*span)
-    finish_timeline(all_axs)
-    save_figure(fig, "fig16_example_runs")
+def fig16(s, raw, clean):
+    """One run end to end: gaze azimuth and elevation per eye (faint: before blink removal), and the
+    vergence point's distance from the head as in Fig 17, per sample (grey) and per stimulus over its
+    reference fixation (black; dashed: the symbol's distance, from front-camera stereo)."""
+    pid, rec = FIG16
+    fig, grid = timeline_figure(3)
+    axs = grid[:, 0]
+    g = s[(s.participant == pid) & (s.recording == rec)].sort_values("t_start_sec")
+    t0, t1 = g.t_start_sec.iloc[0], g.t_end_sec.iloc[-1]
+    starts = g.t_start_sec  # every stimulus, also those without a vergence point
+    for eye in EYES:
+        c = EYE_COLORS[eye]
+        for d, kw in ((raw[(pid, rec, eye)], dict(linewidth=0.3, alpha=0.1)), (clean[(pid, rec, eye)], {})):
+            axs[0].plot(d.index, d.azimuth_deg, color=c, **kw)
+            axs[1].plot(d.index, d.elevation_deg, color=c, **kw)
+    va = vergence_series(clean, pid, rec)
+    axs[2].plot(va.index, va, c="k", alpha=0.3)
+    for _, r in g.dropna(subset=["vergence_mm"]).iterrows():
+        span = (r.t_fix_start_offset, r.t_fix_end)
+        axs[2].plot(span, (r.symbol_mm, r.symbol_mm), color="k", linestyle="--", linewidth=1)
+        axs[2].plot(span, (r.vergence_mm, r.vergence_mm), color="k")
+        axs[2].text(r.t_fix_start_offset, r.vergence_mm, f"[{r.symbol}]\n{r.vergence_mm:.0f}", ha="right",
+                    va="center", weight="bold")
+    # scale to the blink-free data; the faint traces' blink artefacts run off the axes
+    for ax, col in zip(axs[:2], ["azimuth_deg", "elevation_deg"]):
+        v = pd.concat([clean[(pid, rec, eye)].loc[t0:t1, col] for eye in EYES])
+        ax.set_ylim(v.min() - 1, v.max() + 1)
+    axs[2].set_ylim(va.loc[t0:t1].quantile(.01) - 100, va.loc[t0:t1].quantile(.99) + 100)
+    for ax in axs:
+        for t in list(starts) + [t1]:
+            ax.axvline(t, color="k", linestyle="--")
+    axs[0].set_ylabel("Azimuth (deg)")
+    axs[1].set_ylabel("Elevation (deg)")
+    axs[2].set_ylabel("Vergence point distance\nfrom the head (mm)")
+    axs[0].set_xlim(t0, t1)
+    finish_timeline(grid)
+    save_figure(fig, "fig16_example_run")
 
 
-def fig17(valid):
-    fig = plt.figure()
-    sns.boxplot(y="vd_mm", x="order_from_participant", color="lightgreen", data=valid,
-                fliersize=0, showcaps=False)
-    sns.swarmplot(y="vd_mm", x="order_from_participant", color="green", data=valid, size=2)
-    m = valid.groupby("order_from_participant").vd_mm.mean()
-    sd = valid.groupby("order_from_participant").vd_mm.std()
-    for t in m.index:
-        plt.text(t - 1, m[t] + 0.1, f"{m[t]:.1f}±{sd[t]:.1f}", ha="center", va="bottom", fontsize=8)
-    plt.plot(m.index - 1, m, "k^")
-    plt.grid(axis="y")
-    plt.ylabel("Vergence Point - Distance to Marker (mm)")
-    plt.xlabel("Depth Order from Participant")
-    plt.ylim(-200, 800)
-    plt.tight_layout()
-    save_figure(fig, "fig17_vergence_by_depth")
+RIG_STYLE = {"A": dict(marker="o", color="0.55"), "B": dict(marker="^", color="0.15")}
 
 
-def fig18(results):
-    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-    for ax, (scope, (acc, confusion)) in zip(axs, results.items()):
-        sns.heatmap(confusion.div(confusion.sum(axis=1), axis=0), annot=True, fmt=".2f", cmap="Greens",
-                    vmin=0, vmax=1, ax=ax, cbar_kws={"label": "Proportion of true depth"})
-        ax.set_title(f"{scope} participant (mean acc. {acc.accuracy.mean():.2f})")
-        ax.set_xlabel("Decoded Depth Order from Participant")
-        ax.set_ylabel("True Depth Order from Participant")
-    fig.tight_layout()
-    save_figure(fig, "fig18_decoding_confusion")
+def fig17(v):
+    """Vergence point against the symbol, both as distance from the head along its forward axis (head: midpoint of
+    the limbus centres; forward: mean of the two front cameras' axes; both over the reference fixation), one point
+    per reference fixation. Large markers: median per symbol and rig, bars: interquartile range. Dashed: vergence
+    point on the symbol."""
+    fig, ax = plt.subplots(figsize=(6, 6), layout="constrained")
+    lim = (min(v.symbol_mm.min(), v.vergence_mm.min()) - 30, max(v.symbol_mm.max(), v.vergence_mm.max()) + 30)
+    ax.plot(lim, lim, "k--", linewidth=1, zorder=1)
+    for rig, st in RIG_STYLE.items():
+        d = v[v.rig == rig]
+        ax.scatter(d.symbol_mm, d.vergence_mm, s=9, marker=st["marker"], facecolor="none", edgecolor=st["color"],
+                   linewidth=0.6, alpha=0.7, zorder=2,
+                   label=f"Rig {rig} ({d.participant.nunique()} participants, {len(d)} fixations)")
+        q = d.groupby("order_from_participant")[["symbol_mm", "vergence_mm"]].quantile([0.25, 0.5, 0.75]).unstack()
+        x, y = q[("symbol_mm", 0.5)], q[("vergence_mm", 0.5)]
+        ax.errorbar(x, y, yerr=[y - q[("vergence_mm", 0.25)], q[("vergence_mm", 0.75)] - y], fmt=st["marker"],
+                    color="k", markerfacecolor="white", markersize=7, capsize=4, linewidth=1.2, zorder=3)
+    ax.set_xlim(*lim)
+    ax.set_ylim(*lim)
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.4)
+    ax.set_xlabel("Symbol distance from the head (mm)")
+    ax.set_ylabel("Vergence point distance from the head (mm)")
+    ax.legend(loc="upper left", fontsize=8, frameon=False)
+    save_figure(fig, "fig17_vergence_vs_symbol_depth")
 
 
 def prepare():
@@ -262,19 +266,20 @@ def main():
     s, fixations, raw, clean = prepare()
 
     runs = s.groupby("participant").recording.nunique().value_counts().sort_index()
-    valid = s[s.vergence_distance.notna()]
+    valid = s[s.t_fix_start.notna()]  # with a reference fixation
+    v = valid[valid.vergence_mm.notna()]  # and a vergence point
     print(f"{s.participant.nunique()} participants; runs per participant -> participants: {runs.to_dict()}; "
-          f"{len(s)} stimuli, {len(valid)} with a reference fixation ({len(s) - len(valid)} without)")
-    print("Vergence point in front of the marker by depth order [mm], mean +/- SD:")
-    print(valid.groupby("order_from_participant").vd_mm.agg(["mean", "std"]).round(1).to_string())
+          f"{len(s)} stimuli, {len(valid)} with a reference fixation ({len(s) - len(valid)} without), "
+          f"{len(v)} with a vergence point; per rig, participants: {v.groupby('rig').participant.nunique().to_dict()}")
+    print("By depth order [mm], mean +/- SD: distance in front of the marker, and from the head:")
+    cols = ["marker_mm", "symbol_marker_mm", "vergence_mm", "symbol_mm"]
+    print(v.groupby("order_from_participant")[cols].agg(["mean", "std"]).round(1).to_string())
 
-    print_discriminability(discriminability(s, clean))
-    results = {scope: decode_depths(valid, scope) for scope in ("within", "cross")}
-    print_decoding(results)
+    print_anova(v)
+    print_error(v)
 
-    fig16(s, fixations, raw, clean)
-    fig17(valid)
-    fig18(results)
+    fig16(s, raw, clean)
+    fig17(v)
     if args.show:
         plt.show()
 

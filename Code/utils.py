@@ -92,31 +92,21 @@ def unit_to_az_el(v):
 # ---------------------------------------------------------------------------- vergence
 
 
-def calculate_vergence_point(o1, d1, o2, d2, epsilon=1e-9, bias=0.5):
-    """Vergence point of two gaze rays (origin o, unit direction d): the midpoint of their
-    closest points. NaN when the rays are near-parallel or meet behind either origin."""
+def vergence_point(o1, d1, o2, d2, epsilon=1e-9):
+    """Vergence point of pairs of gaze rays (origin o, unit direction d; single vectors or (n, 3)
+    arrays, one pair per row): the midpoint of the closest points of the two rays, shape (n, 3).
+    NaN where the rays are near-parallel or meet behind either origin."""
+    o1, d1, o2, d2 = (np.atleast_2d(np.asarray(v, dtype=float)) for v in (o1, d1, o2, d2))
     w0 = o1 - o2
-    a, b, c = np.dot(d1, d1), np.dot(d1, d2), np.dot(d2, d2)
-    d, e = np.dot(d1, w0), np.dot(d2, w0)
+    a, b, c = (d1 * d1).sum(1), (d1 * d2).sum(1), (d2 * d2).sum(1)
+    d, e = (d1 * w0).sum(1), (d2 * w0).sum(1)
     denominator = a * c - b * b
-    if abs(denominator) < epsilon:
-        return np.array([np.nan, np.nan, np.nan])
-    t1 = (b * e - c * d) / denominator
-    t2 = (a * e - b * d) / denominator
-    if t1 < 0 or t2 < 0:
-        return np.array([np.nan, np.nan, np.nan])
-    return (o1 + t1 * d1) * bias + (o2 + t2 * d2) * (1.0 - bias)
-
-
-def vergence_distance(ic_left, ig_left, ic_right, ig_right):
-    """Distance to the vergence point from the angle between the gaze rays and the
-    inter-limbus baseline, treating the rays as an isosceles triangle. Works per row on
-    (n, 3) arrays or on single vectors."""
-    ig_left, ig_right = np.atleast_2d(ig_left), np.atleast_2d(ig_right)
-    cos_a = np.clip((ig_left * ig_right).sum(axis=1)
-                    / np.linalg.norm(ig_left, axis=1) / np.linalg.norm(ig_right, axis=1), -1.0, 1.0)
-    base = np.linalg.norm(np.atleast_2d(ic_left) - np.atleast_2d(ic_right), axis=1)
-    return base / 2 / np.sqrt((1 - cos_a) / (1 + cos_a))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t1 = (b * e - c * d) / denominator
+        t2 = (a * e - b * d) / denominator
+    point = 0.5 * (o1 + t1[:, None] * d1 + o2 + t2[:, None] * d2)
+    point[(np.abs(denominator) < epsilon) | (t1 < 0) | (t2 < 0)] = np.nan
+    return point
 
 
 # ---------------------------------------------------------------------------- U|E percentiles

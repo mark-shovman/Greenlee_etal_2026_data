@@ -18,7 +18,7 @@ the Results from the data in `Data/`.
 ├── Code/                   # Analysis and plotting scripts
 │   ├── analyse_accuracy.py    # Grid fixation: Figs 7-12, Table 1
 │   ├── analyse_luminance.py   # Background luminance change: Figs 13-15
-│   ├── analyse_vergence.py    # Visual search: Figs 16-18
+│   ├── analyse_vergence.py    # Visual search: Figs 16-17
 │   ├── participant_table.py   # Per-participant supplementary table
 │   └── utils.py
 ├── Data/
@@ -26,7 +26,7 @@ the Results from the data in `Data/`.
 │   ├── 2_luminance/
 │   ├── 3_vergence/
 │   └── participants.csv    # Age group, sex, refraction
-├── Tables/                 # Per-participant table (participants.*), kappa per grid block (kappa_blocks.*)
+├── Tables/                 # Per-participant table (participants.csv), kappa per grid block (kappa_blocks.csv)
 ├── LICENSE
 ├── README.md
 └── requirements.txt        # Python dependencies
@@ -49,22 +49,22 @@ the Results from the data in `Data/`.
 
 ## Per-participant table
 
-`Tables/participants.csv` (full precision) and `Tables/participants.md` (rounded) give one row per
-participant; `python Code/participant_table.py` regenerates both. Cells are empty where a
+`Tables/participants.csv` gives one row per participant, at full precision;
+`python Code/participant_table.py` regenerates it. Cells are empty where a
 participant did not take part in that experiment.
 
 * `in_training_set`: other recordings of this participant were in the limbus model's training set
 * `age_group` (decade), `sex`, `refraction_{left|right}_D`: from `Data/participants.csv`; refraction is empty where it was not recorded
-* `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks (`Tables/kappa_blocks.*`)
+* `kappa_{left|right}_{x|y}_deg`: kappa correction per eye, median over the participant's grid blocks (`Tables/kappa_blocks.csv`)
 * `n_fixations`, `n_fixations_valid`: all fixations, and the valid ones (`is_fixation_valid`)
 * `{accuracy|precision}_median_deg`: unweighted median over the valid fixations
 * `{accuracy|precision}_{whole|central}_deg`: inverse-density-weighted median over the whole FOV or the central 15×15°, i.e. the participant's E50 in Figs 11–12; `_ci_low`, `_ci_high`: bootstrap 95% CI (2,000 resamples of the participant's fixations, each keeping its weight); `n_{accuracy|precision}_{whole|central}`: fixations in that weighting
 * `lum_valid_episode_eyes`: luminance episodes × eyes without a saccade or blink between −1,300 and 1,500 ms in either eye, and with gaze and pupil in at least 30% of the expected samples of each analysis window in both eyes (of 6); `lum_constriction_mm`, `lum_gaze_shift_deg`: their mean pupil constriction and apparent gaze shift (baseline −500–0 ms, recovery 1,000–1,500 ms)
-* `vs_runs`, `vs_stimuli_valid`: visual search runs, and symbols with a reference fixation
-* `vs_decoding_{within|cross}`: leave-one-out depth decoding accuracy (Fig. 18)
-* `vs_pairs_discriminated`, `vs_pairs_testable`: adjacent depth pairs discriminated at p_adj < 0.001, of those testable
+* `vs_rig`, `vs_runs`, `vs_stimuli_valid`: the visual search rig (`A` or `B`), runs, and symbols with a reference fixation and a vergence point
+* `vs_step_mm`: step of the vergence point's distance in front of the marker per depth order, from a least-squares line over the participant's stimuli (the symbols are 55 mm apart)
+* `vs_error_mm`: median of the vergence point's minus the symbol's distance from the head (Fig. 17)
 
-`Tables/kappa_blocks.csv` / `.md`, written by the same script, give kappa per participant, eye, recording and
+`Tables/kappa_blocks.csv`, written by the same script, gives kappa per participant, eye, recording and
 grid block (`kappa_grid_{x|y}_deg` in `fixations.csv`), with the block's number of valid fixations.
 
 ## Data

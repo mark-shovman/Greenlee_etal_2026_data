@@ -1,6 +1,6 @@
 """Per-participant supplementary table: grid accuracy and precision, luminance change, vergence.
 
-Writes Tables/participants.csv (full precision) and Tables/participants.md (rounded). One row per
+Writes Tables/participants.csv and Tables/kappa_blocks.csv, at full precision. One row per
 participant; cells are empty where a participant did not do that experiment. Demographics come from
 Data/participants.csv when it is present; refraction is empty where it was not recorded.
 
@@ -96,21 +96,20 @@ def luminance_columns():
 
 
 def vergence_columns():
-    s, _, _, clean = vs.prepare()
-    valid = s[s.vergence_distance.notna()]
-    d = vs.discriminability(s, clean)
+    s, _, _, _ = vs.prepare()
+    valid = s[s.t_fix_start.notna() & s.vergence_mm.notna()]  # with a reference fixation and a vergence point
     out = pd.DataFrame({
+        "vs_rig": s.groupby("participant").rig.first(),
         "vs_runs": s.groupby("participant").recording.nunique(),
         "vs_stimuli_valid": valid.groupby("participant").size(),
-        "vs_pairs_discriminated": d.groupby("participant").p_adj.agg(lambda p: int((p < vs.ALPHA).sum())),
-        "vs_pairs_testable": d.groupby("participant").p.count(),
+        # least-squares line of the vergence point's distance in front of the marker on depth order
+        "vs_step_mm": valid.groupby("participant").apply(
+            lambda g: -np.polyfit(g.order_from_participant, g.marker_mm, 1)[0]),
+        "vs_error_mm": (valid.vergence_mm - valid.symbol_mm).groupby(valid.participant).median(),
     })
-    for scope in ("within", "cross"):
-        acc, _ = vs.decode_depths(valid, scope)
-        out[f"vs_decoding_{scope}"] = acc.accuracy
     out["vs_stimuli_valid"] = out.vs_stimuli_valid.fillna(0).astype(int)
     out.index.name = "participant"
-    return out, d, valid
+    return out, valid
 
 
 # ---------------------------------------------------------------------------- output
@@ -124,92 +123,30 @@ def demographics(index):
     return pd.read_csv(path, index_col="participant")[DEMOGRAPHICS].reindex(index)
 
 
-def fmt(v, dp):
-    return "" if pd.isna(v) else f"{v:.{dp}f}"
-
-
-def ci(r, col, dp):
-    if pd.isna(r[f"{col}_deg"]):
-        return ""
-    return f"{r[f'{col}_deg']:.{dp}f} [{r[f'{col}_ci_low']:.{dp}f}, {r[f'{col}_ci_high']:.{dp}f}]"
-
-
-def as_int(v):
-    return "" if pd.isna(v) else f"{int(v)}"
-
-
-def markdown(t):
-    """The rounded table: degrees of accuracy and kappa to 2 dp, precision to 3 dp, refraction
-    to 2 dp (it comes in 0.25 D steps)."""
-    cols = {
-        "Participant": lambda r: r.name,
-        "Training": lambda r: "yes" if r.in_training_set else "no",
-        "Age": lambda r: "" if pd.isna(r.age_group) else r.age_group,
-        "Sex": lambda r: "" if pd.isna(r.sex) else r.sex,
-        "Refraction L / R (D)": lambda r: "" if pd.isna(r.refraction_left_D) else
-        f"{r.refraction_left_D:+.2f} / {r.refraction_right_D:+.2f}",
-        "Kappa L x, y (°)": lambda r: f"{r.kappa_left_x_deg:.2f}, {r.kappa_left_y_deg:.2f}",
-        "Kappa R x, y (°)": lambda r: f"{r.kappa_right_x_deg:.2f}, {r.kappa_right_y_deg:.2f}",
-        "Fixations valid / all": lambda r: f"{r.n_fixations_valid} / {r.n_fixations}",
-        "Accuracy, all FOV (°)": lambda r: ci(r, "accuracy_whole", 2),
-        "Accuracy, central (°)": lambda r: ci(r, "accuracy_central", 2),
-        "Precision, all FOV (°)": lambda r: ci(r, "precision_whole", 3),
-        "Precision, central (°)": lambda r: ci(r, "precision_central", 3),
-        "Luminance episode-eyes": lambda r: as_int(r.lum_valid_episode_eyes),
-        "Constriction (mm)": lambda r: fmt(r.lum_constriction_mm, 2),
-        "Gaze shift (°)": lambda r: fmt(r.lum_gaze_shift_deg, 2),
-        "Vergence runs": lambda r: as_int(r.vs_runs),
-        "Decoding, within": lambda r: fmt(r.vs_decoding_within, 2),
-        "Decoding, cross": lambda r: fmt(r.vs_decoding_cross, 2),
-        "Pairs discriminated / tested": lambda r: "" if pd.isna(r.vs_runs) else
-        f"{int(r.vs_pairs_discriminated)} / {int(r.vs_pairs_testable)}",
-    }
-    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
-    for _, r in t.iterrows():
-        lines.append("| " + " | ".join(str(f(r)) for f in cols.values()) + " |")
-    return "\n".join(lines) + "\n"
-
-
-def blocks_markdown(b):
-    """The per-block kappa table, kappa to 2 dp."""
-    lines = ["| Participant | Eye | Recording | Grid | Kappa x (°) | Kappa y (°) | Fixations valid |",
-             "|---|---|---|---|---|---|---|"]
-    for _, r in b.iterrows():
-        lines.append(f"| {r.participant} | {r.eye} | {r.recording} | {r.grid} | {fmt(r.kappa_x_deg, 2)} | "
-                     f"{fmt(r.kappa_y_deg, 2)} | {r.n_fixations_valid} |")
-    return "\n".join(lines) + "\n"
-
-
 def main():
     grid, ue50, n_valid, blocks = grid_columns()
     luminance, n_episode_eyes = luminance_columns()
-    vergence, pairs, valid = vergence_columns()
+    vergence, valid = vergence_columns()
 
     t = demographics(grid.index).join(grid).join(luminance).join(vergence)
     t = t[["in_training_set"] + DEMOGRAPHICS + [c for c in t.columns if c not in DEMOGRAPHICS + ["in_training_set"]]]
-    counts = [c for c in t.columns if c.startswith(("n_", "vs_runs", "vs_stimuli", "vs_pairs", "lum_valid"))]
+    counts = [c for c in t.columns if c.startswith(("n_", "vs_runs", "vs_stimuli", "lum_valid"))]
     t[counts] = t[counts].astype("Int64")  # blank where the experiment was not done, not 0.0
 
     # the table must add up to the cohort analyses it was split from
     assert t.n_fixations_valid.sum() == n_valid
     assert t.lum_valid_episode_eyes.sum() == n_episode_eyes
     assert t.vs_stimuli_valid.sum() == len(valid)
-    assert t.vs_pairs_discriminated.sum() == (pairs.p_adj < vs.ALPHA).sum()
-    assert t.vs_pairs_testable.sum() == pairs.p.notna().sum()
     print(f"{len(t)} participants: {t.n_fixations.notna().sum()} grid, {t.lum_constriction_mm.notna().sum()} "
           f"with valid luminance episodes, {t.vs_runs.notna().sum()} vergence")
     print("U50 over the per-participant weighted medians (= U50|E50 in Figs 11-12): "
           + ", ".join(f"{k} {v:.3f}" for k, v in ue50.items()))
-    print(f"Decoding mean: within {t.vs_decoding_within.mean():.3f}, cross {t.vs_decoding_cross.mean():.3f}; "
-          f"pairs discriminated {t.vs_pairs_discriminated.sum():.0f}/{t.vs_pairs_testable.sum():.0f}")
+    print(f"Vergence step per depth median {t.vs_step_mm.median():.1f} mm "
+          f"(range {t.vs_step_mm.min():.1f}-{t.vs_step_mm.max():.1f})")
 
     os.makedirs(TABLES, exist_ok=True)
     t.to_csv(os.path.join(TABLES, "participants.csv"))
-    with open(os.path.join(TABLES, "participants.md"), "w", encoding="utf-8") as f:
-        f.write(markdown(t))
     blocks.to_csv(os.path.join(TABLES, "kappa_blocks.csv"), index=False)
-    with open(os.path.join(TABLES, "kappa_blocks.md"), "w", encoding="utf-8") as f:
-        f.write(blocks_markdown(blocks))
     print(f"Wrote {TABLES}")
 
 
