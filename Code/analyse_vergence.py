@@ -1,7 +1,7 @@
-"""Visual search task: paper Figures 16-17 and the numbers quoted with them. In the marker frame, where the symbols
-stand still: the repeated-measures ANOVA on the participants' mean vergence point distance in front of the marker per
-depth order, with Holm-corrected comparisons of adjacent depths. On distance from the head (Figs 16-17): the error of
-the vergence point against the symbol.
+"""Visual search task: paper Figures 16-17 and the numbers quoted with them. In the marker frame,
+where the symbols stand still: the repeated-measures ANOVA on the participants' mean vergence point
+distance in front of the marker per depth order, with Holm-corrected comparisons of adjacent
+depths. On distance from the head (Figs 16-17): the error of the vergence point against the symbol.
 
 Reads Data/3_vergence/. Run from anywhere:  python Code/analyse_vergence.py [--show]
 """
@@ -14,20 +14,22 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
-from utils import (EYE_COLORS, EYES, IC, IG, blank, data_path, finish_timeline, read_series, save_figure,
-                   timeline_figure, vergence_point)
+from utils import (EYE_COLORS, EYES, IC, IG, blank, data_path, finish_timeline, read_series,
+                   save_figure, timeline_figure, vergence_point)
 
 N_DEPTHS = 6
 MIN_FIXATION_DURATION = 1.0  # [s] a reference fixation must last this long
 FIXATION_START_OFFSET = 0.3  # [s] skipped at the start of the reference fixation
-# Symbol positions per rig (stimuli.csv), by order_from_participant 1-6: (x, y, z) [mm] in the marker frame (x right,
-# y down, z away from the participant), the letter on the face towards the participant. From the scene-camera stereo
-# pairs: median over the runs where all six were found (58 rig A, 15 rig B); runs scatter ~1 mm around them.
+# Symbol positions per rig (stimuli.csv), by order_from_participant 1-6: (x, y, z) [mm] in the
+# marker frame (x right, y down, z away from the participant), the letter on the face towards the
+# participant. From the scene-camera stereo pairs: median over the runs where all six were found
+# (58 rig A, 15 rig B); runs scatter ~1 mm around them.
 SYMBOLS = {
     "A": ((-8, 92, -339), (-8, 91, -285), (-9, 91, -229), (-8, 90, -175), (-9, 90, -119), (-10, 89, -63)),
     "B": ((-7, 96, -397), (-6, 92, -343), (-8, 92, -288), (-8, 94, -233), (-7, 93, -176), (-9, 90, -120)),
 }
 FIG16 = ("p057", "vergence_3")  # the example run: participant, recording
+RIG_STYLE = {"A": dict(marker="o", color="0.55"), "B": dict(marker="^", color="0.15")}  # Fig 17
 FFZ = [f"ffz{x}" for x in "XYZ"]  # forward axis of the eye's front camera, a unit vector
 
 
@@ -68,19 +70,19 @@ def reference_fixations(stimuli, fixations):
     return s
 
 
-def head_distance(v, p):
-    """Distance [mm] of the points p (N, 3) from the head, along its forward axis, per stimulus row of v."""
-    head = v[["head_x", "head_y", "head_z"]].to_numpy()
-    fwd = v[["fwd_x", "fwd_y", "fwd_z"]].to_numpy()
+def head_distance(p, head, fwd):
+    """Distance [mm] of the points p from the head along its unit forward axis; one per row of the
+    (n, 3) arrays."""
     return np.einsum("ij,ij->i", p - head, fwd)
 
 
 def stimulus_vergence(s, clean):
-    """Vergence per stimulus, from the mean limbus centres and gaze over its reference fixation (first 300 ms
-    skipped); gaze points into the eye, so the rays run along -ig. The head over the same window: the midpoint of the
-    limbus centres, and the mean of the two front cameras' forward axes. vergence_mm and symbol_mm: the vergence
-    point's and the symbol's distance from the head, along its forward axis. marker_mm and symbol_marker_mm: their
-    distance in front of the marker, towards the participant."""
+    """Vergence per stimulus, from the mean limbus centres and gaze over its reference fixation
+    (first 300 ms skipped); gaze points into the eye, so the rays run along -ig. The head over the
+    same window: the midpoint of the limbus centres, and the mean of the two front cameras' forward
+    axes. vergence_mm and symbol_mm: the vergence point's and the symbol's distance from the head,
+    along its forward axis. marker_mm and symbol_marker_mm: their distance in front of the marker,
+    towards the participant."""
     for i, r in s.iterrows():
         if np.isnan(r.t_fix_start):
             continue
@@ -96,23 +98,24 @@ def stimulus_vergence(s, clean):
         f = fz["left"] + fz["right"]
         s.loc[i, ["fwd_x", "fwd_y", "fwd_z"]] = f / np.linalg.norm(f)
     symbols = np.array([SYMBOLS[r][k - 1] for r, k in zip(s.rig, s.order_from_participant)], float)
-    s["vergence_mm"] = head_distance(s, s[["vp_x", "vp_y", "vp_z"]].to_numpy())
-    s["symbol_mm"] = head_distance(s, symbols)
+    head = s[["head_x", "head_y", "head_z"]].to_numpy()
+    fwd = s[["fwd_x", "fwd_y", "fwd_z"]].to_numpy()
+    s["vergence_mm"] = head_distance(s[["vp_x", "vp_y", "vp_z"]].to_numpy(), head, fwd)
+    s["symbol_mm"] = head_distance(symbols, head, fwd)
     s["marker_mm"] = -s.vp_z
     s["symbol_marker_mm"] = -symbols[:, 2]
     return s
 
 
 def vergence_series(clean, pid, rec):
-    """Per sample, the vergence point's distance from the head (mm), as in Fig 17: along the mean of the
-    two front cameras' forward axes, from the midpoint of the limbus centres; on the right eye's
+    """Per sample, the vergence point's distance from the head, as in Fig 17, on the right eye's
     timeline; for display (Fig 16) only."""
     left, right = paired_eyes(clean, pid, rec)
     p = vergence_point(left[IC].values, -left[IG].values, right[IC].values, -right[IG].values)
     head = (left[IC].values + right[IC].values) / 2
     fwd = left[FFZ].values + right[FFZ].values
     fwd /= np.linalg.norm(fwd, axis=1)[:, None]
-    return pd.Series(np.einsum("ij,ij->i", p - head, fwd), index=right.index)
+    return pd.Series(head_distance(p, head, fwd), index=right.index)
 
 
 # ---------------------------------------------------------------------------- repeated-measures ANOVA
@@ -148,9 +151,9 @@ def rm_anova(m):
 
 
 def print_anova(v):
-    """Depth order on the participants' mean vergence point distance in front of the marker (averaged over runs; the
-    symbols stand still in the marker frame): repeated-measures ANOVA; adjacent depths by paired t-tests,
-    Holm-corrected, the step set against the symbols' own step."""
+    """Depth order on the participants' mean vergence point distance in front of the marker
+    (averaged over runs; the symbols stand still in the marker frame): repeated-measures ANOVA;
+    adjacent depths by paired t-tests, Holm-corrected, the step set against the symbols' own step."""
     m = participant_means(v)
     sym = participant_means(v, "symbol_marker_mm").loc[m.index]
     a = rm_anova(m)
@@ -172,7 +175,8 @@ def print_anova(v):
 
 
 def print_error(v):
-    """Vergence point against the symbol, both as distance from the head: median and IQR of the difference."""
+    """Vergence point against the symbol, both as distance from the head: median and IQR of the
+    difference."""
     e = v.vergence_mm - v.symbol_mm
     print("Vergence minus symbol distance from the head [mm], median (IQR): "
           + "; ".join(f"{name} {g.median():.0f} ({g.quantile(.25):.0f} to {g.quantile(.75):.0f}), n = {len(g)}"
@@ -184,8 +188,8 @@ def print_error(v):
 
 def fig16(s, raw, clean):
     """One run end to end: gaze azimuth and elevation per eye (faint: before blink removal), and the
-    vergence point's distance from the head as in Fig 17, per sample (grey) and per stimulus over its
-    reference fixation (black; dashed: the symbol's distance, from front-camera stereo)."""
+    vergence point's distance from the head as in Fig 17, per sample (grey) and per stimulus over
+    its reference fixation (black; dashed: the symbol's distance, from front-camera stereo)."""
     pid, rec = FIG16
     fig, grid = timeline_figure(3)
     axs = grid[:, 0]
@@ -221,22 +225,19 @@ def fig16(s, raw, clean):
     save_figure(fig, "fig16_example_run")
 
 
-RIG_STYLE = {"A": dict(marker="o", color="0.55"), "B": dict(marker="^", color="0.15")}
-
-
 def fig17(v):
-    """Vergence point against the symbol, both as distance from the head along its forward axis (head: midpoint of
-    the limbus centres; forward: mean of the two front cameras' axes; both over the reference fixation), one point
-    per reference fixation. Large markers: median per symbol and rig, bars: interquartile range. Dashed: vergence
-    point on the symbol."""
+    """Vergence point against the symbol, both as distance from the head along its forward axis
+    (head: midpoint of the limbus centres; forward: mean of the two front cameras' axes; both over
+    the reference fixation), one point per reference fixation; rig A circles, rig B triangles.
+    Large markers: median per symbol and rig, bars: interquartile range. Dashed: vergence point on
+    the symbol."""
     fig, ax = plt.subplots(figsize=(6, 6), layout="constrained")
     lim = (min(v.symbol_mm.min(), v.vergence_mm.min()) - 30, max(v.symbol_mm.max(), v.vergence_mm.max()) + 30)
     ax.plot(lim, lim, "k--", linewidth=1, zorder=1)
     for rig, st in RIG_STYLE.items():
         d = v[v.rig == rig]
         ax.scatter(d.symbol_mm, d.vergence_mm, s=9, marker=st["marker"], facecolor="none", edgecolor=st["color"],
-                   linewidth=0.6, alpha=0.7, zorder=2,
-                   label=f"Rig {rig} ({d.participant.nunique()} participants, {len(d)} fixations)")
+                   linewidth=0.6, alpha=0.7, zorder=2)
         q = d.groupby("order_from_participant")[["symbol_mm", "vergence_mm"]].quantile([0.25, 0.5, 0.75]).unstack()
         x, y = q[("symbol_mm", 0.5)], q[("vergence_mm", 0.5)]
         ax.errorbar(x, y, yerr=[y - q[("vergence_mm", 0.25)], q[("vergence_mm", 0.75)] - y], fmt=st["marker"],
@@ -247,15 +248,14 @@ def fig17(v):
     ax.grid(alpha=0.4)
     ax.set_xlabel("Symbol distance from the head (mm)")
     ax.set_ylabel("Vergence point distance from the head (mm)")
-    ax.legend(loc="upper left", fontsize=8, frameon=False)
     save_figure(fig, "fig17_vergence_vs_symbol_depth")
 
 
 def prepare():
-    """The data and the per-stimulus vergence: (stimuli with vergence, fixations, raw, clean)."""
+    """The data and the per-stimulus vergence: (stimuli with vergence, raw, clean)."""
     stimuli, fixations, raw = load()
     clean = {k: blank(v) for k, v in raw.items()}
-    return stimulus_vergence(reference_fixations(stimuli, fixations), clean), fixations, raw, clean
+    return stimulus_vergence(reference_fixations(stimuli, fixations), clean), raw, clean
 
 
 def main():
@@ -263,7 +263,7 @@ def main():
     p.add_argument("--show", action="store_true", help="Show the figures as well as saving them")
     args = p.parse_args()
 
-    s, fixations, raw, clean = prepare()
+    s, raw, clean = prepare()
 
     runs = s.groupby("participant").recording.nunique().value_counts().sort_index()
     valid = s[s.t_fix_start.notna()]  # with a reference fixation

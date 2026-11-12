@@ -15,13 +15,13 @@ DATA = os.path.join(ROOT, "Data")
 FIGURES = os.path.join(ROOT, "Figures")
 
 EYES = ["left", "right"]
-EYE_COLORS = {"left": "tab:blue", "right": "tab:red"}
+IC = [f"ic{x}" for x in "XYZ"]  # limbus centre [mm]
+IG = [f"ig{x}" for x in "XYZ"]  # gaze direction, a unit vector pointing *into* the eye
 
+EYE_COLORS = {"left": "tab:blue", "right": "tab:red"}
 # The example timelines (Figs 7, 13, 16) share width, panel height and the time axis
 TIMELINE_WIDTH = 12  # [in]
 TIMELINE_PANEL_HEIGHT = 2.2  # [in]
-IC = [f"ic{x}" for x in "XYZ"]  # limbus centre [mm]
-IG = [f"ig{x}" for x in "XYZ"]  # gaze direction, a unit vector pointing *into* the eye
 
 
 def data_path(*parts):
@@ -54,7 +54,7 @@ def finish_timeline(axs):
         ax.set_xlabel("Time (s)")
 
 
-# ---------------------------------------------------------------------------- angles
+# ---------------------------------------------------------------------------- kappa
 
 
 def kappa_blocks(df):
@@ -67,10 +67,13 @@ def kappa_blocks(df):
     return out.reset_index()
 
 
+# ---------------------------------------------------------------------------- angles
+
 
 def angle_unit(u, v):
-    """Angle in degrees between two unit vectors."""
-    return np.degrees(np.arccos(np.dot(u, v)))
+    """Angle in degrees between two unit vectors; the dot product is clipped, so rounding past
+    +-1 gives 0 or 180 deg rather than NaN."""
+    return np.degrees(np.arccos(np.clip(np.dot(u, v), -1.0, 1.0)))
 
 
 def unit_mean(gd):
@@ -154,11 +157,14 @@ def ue_percentiles(df, uid_col, data_col, pcts, weights=None):
 
 def pooled_median(df, metric, weights=None):
     """Median of metric over all fixations; survey-weighted by the `weights` column if given."""
-    v = df[metric].to_numpy(dtype=float)
-    if weights is not None:
-        return weighted_percentile(v, df[weights].to_numpy(dtype=float), 50)
-    v = v[np.isfinite(v)]
-    return np.median(v) if v.size else np.nan
+    if weights is None:
+        return nan_safe_percentile(df[metric], 50)
+    return weighted_percentile(df[metric], df[weights], 50)
+
+
+def cell_of(values, cell):
+    """Centre of the `cell`-sized bin, the bins centred on 0, holding each value."""
+    return np.round(values / cell) * cell
 
 
 def inverse_weights(df, metric, cell, min_in_cell, region=None, x="stimulus_head_x_deg",
@@ -174,9 +180,7 @@ def inverse_weights(df, metric, cell, min_in_cell, region=None, x="stimulus_head
     if region is not None:
         w, h = region
         d = d[(d[x].abs() <= w / 2) & (d[y].abs() <= h / 2)]
-    cx = np.round(d[x] / cell) * cell
-    cy = np.round(d[y] / cell) * cell
-    counts = d.groupby([cx, cy])[x].transform("size")
+    counts = d.groupby([cell_of(d[x], cell), cell_of(d[y], cell)])[x].transform("size")
     keep = counts >= min_in_cell
     d = d[keep].copy()
     d["weight"] = 1.0 / counts[keep]

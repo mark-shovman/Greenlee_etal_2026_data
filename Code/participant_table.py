@@ -2,7 +2,7 @@
 
 Writes Tables/participants.csv and Tables/kappa_blocks.csv, at full precision. One row per
 participant; cells are empty where a participant did not do that experiment. Demographics come from
-Data/participants.csv when it is present; refraction is empty where it was not recorded.
+Data/participants.csv; refraction is empty where it was not recorded.
 
 Run from anywhere:  python Code/participant_table.py
 """
@@ -14,7 +14,7 @@ import pandas as pd
 
 import analyse_luminance as lum
 import analyse_vergence as vs
-from analyse_accuracy import CELL, CENTRAL, METRICS, MIN_IN_CELL
+from analyse_accuracy import CELL, CENTRAL, MIN_IN_CELL
 from utils import ROOT, data_path, inverse_weights, kappa_blocks, nan_safe_percentile, weighted_percentile
 
 TABLES = os.path.join(ROOT, "Tables")
@@ -80,11 +80,10 @@ def luminance_columns():
     protocol, events, series = lum.load()
     ep = lum.episodes(protocol)
     clean = lum.clean_episodes(lum.episode_metrics(ep, events, series))
-    clean["constriction"] = clean.pupil_before - clean.pupil_after
     g = clean.groupby("participant")
     out = pd.DataFrame({
         "lum_valid_episode_eyes": g.size(),
-        "lum_constriction_mm": g.constriction.mean(),
+        "lum_constriction_mm": g.pupil_change.mean(),
         "lum_gaze_shift_deg": g["shift"].mean(),
     }).reindex(sorted(protocol.participant.unique()))
     out["lum_valid_episode_eyes"] = out.lum_valid_episode_eyes.fillna(0).astype(int)
@@ -96,14 +95,14 @@ def luminance_columns():
 
 
 def vergence_columns():
-    s, _, _, _ = vs.prepare()
-    valid = s[s.t_fix_start.notna() & s.vergence_mm.notna()]  # with a reference fixation and a vergence point
+    s, _, _ = vs.prepare()
+    valid = s[s.vergence_mm.notna()]  # a vergence point implies a reference fixation
     out = pd.DataFrame({
         "vs_rig": s.groupby("participant").rig.first(),
         "vs_runs": s.groupby("participant").recording.nunique(),
         "vs_stimuli_valid": valid.groupby("participant").size(),
         # least-squares line of the vergence point's distance in front of the marker on depth order
-        "vs_step_mm": valid.groupby("participant").apply(
+        "vs_step_mm": valid.groupby("participant")[["order_from_participant", "marker_mm"]].apply(
             lambda g: -np.polyfit(g.order_from_participant, g.marker_mm, 1)[0]),
         "vs_error_mm": (valid.vergence_mm - valid.symbol_mm).groupby(valid.participant).median(),
     })
@@ -116,11 +115,7 @@ def vergence_columns():
 
 
 def demographics(index):
-    path = data_path("participants.csv")
-    if not os.path.exists(path):
-        print(f"No {path}: demographic columns left empty")
-        return pd.DataFrame(index=index, columns=DEMOGRAPHICS)
-    return pd.read_csv(path, index_col="participant")[DEMOGRAPHICS].reindex(index)
+    return pd.read_csv(data_path("participants.csv"), index_col="participant")[DEMOGRAPHICS].reindex(index)
 
 
 def main():

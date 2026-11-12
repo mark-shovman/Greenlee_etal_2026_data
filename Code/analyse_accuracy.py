@@ -11,7 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.patches import Rectangle
 
-from utils import (EYE_COLORS, EYES, data_path, finish_timeline, inverse_weights, pooled_median,
+from utils import (EYE_COLORS, EYES, cell_of, data_path, finish_timeline, inverse_weights, pooled_median,
                    save_figure, timeline_figure, ue_percentiles, unit_to_az_el)
 
 CELL = 3.0  # FOV cell size [deg]; cells are centred on 0
@@ -24,11 +24,7 @@ TABLE1 = {**METRICS, "precision_std_deg": ("Precision (SD)", None)}  # Table 1 o
 X, Y = "stimulus_head_x_deg", "stimulus_head_y_deg"
 
 FIG7 = ("p038_grid_1_grid1", range(11, 25))  # recording, fixations shown
-FIG8 = "p042_grid_1_grid2"
-
-
-def cells(df, col):
-    return np.round(df[col] / CELL) * CELL
+FIG8 = ("p042", "grid_1", "grid2")  # participant, recording, grid block
 
 
 # ---------------------------------------------------------------------------- numbers
@@ -52,14 +48,18 @@ def print_counts(df):
 
 
 def table1(edata, n_all):
-    """Table 1: pooled medians, unweighted and inverse-density-weighted. Also returns the U|E
-    tables behind Figs 11 and 12."""
+    """Table 1: pooled medians, unweighted and inverse-density-weighted, each cell as
+    `all (trained/untrained)`: participants with and without other sessions in the model's
+    training set (the groups keep the whole cohort's weights). Also returns the U|E tables behind
+    Figs 11 and 12."""
+    groups = {"all": None, "trained": True, "untrained": False}
+    for label, flag in groups.items():
+        g = edata if flag is None else edata[edata.participant_in_training_set == flag]
+        print(f"{label}: {len(g)} fixations from {g.participant.nunique()} participants")
     rows, ue = {}, {}
     for metric, (name, _) in TABLE1.items():
         whole = inverse_weights(edata, metric, CELL, MIN_IN_CELL)
         central = inverse_weights(edata, metric, CELL, MIN_IN_CELL, CENTRAL)
-        rows[name] = [pooled_median(edata, metric), pooled_median(whole, metric, "weight"),
-                      pooled_median(central, metric, "weight")]
         print(f"\n{name}: {len(whole)} fixations in the whole-FOV weighting "
               f"({n_all - len(whole)} of {n_all} removed: invalid and cells under {MIN_IN_CELL}), "
               f"{len(central)} in the central {CENTRAL[0]}x{CENTRAL[1]} deg")
@@ -70,34 +70,16 @@ def table1(edata, n_all):
         }
         for label, t in ue[metric].items():
             print(f"  U|E, {label}:\n{t.round(3).to_string()}")
+        cells = []
+        for d, w in ((edata, None), (whole, "weight"), (central, "weight")):
+            a, t, u = (pooled_median(d if flag is None else d[d.participant_in_training_set == flag], metric, w)
+                       for flag in groups.values())
+            cells.append(f"{a:.3f} ({t:.3f}/{u:.3f})")
+        rows[name] = cells
     t1 = pd.DataFrame(rows, index=["Unweighted, all fixations", "Weighted, all FOV",
                                    "Weighted, central FOV"]).T
-    print(f"\nTable 1: median accuracy and precision [deg]\n{t1.round(4).to_string()}")
-    print(t1.round(2).to_string())
+    print(f"\nTable 1: median accuracy and precision, all (trained/untrained) [deg]\n{t1.to_string()}")
     return ue
-
-
-def table1_by_training(edata):
-    """Table 1 with each cell as `all (trained/untrained)`: participants with and without other
-    sessions in the model's training set. The groups keep the whole cohort's weights."""
-    groups = {"all": None, "trained": True, "untrained": False}
-    for label, flag in groups.items():
-        g = edata if flag is None else edata[edata.participant_in_training_set == flag]
-        print(f"{label}: {len(g)} fixations from {g.participant.nunique()} participants")
-    rows = {}
-    for metric, (name, _) in TABLE1.items():
-        whole = inverse_weights(edata, metric, CELL, MIN_IN_CELL)
-        central = inverse_weights(edata, metric, CELL, MIN_IN_CELL, CENTRAL)
-        cols = []
-        for flag in groups.values():
-            sel = [d if flag is None else d[d.participant_in_training_set == flag]
-                   for d in (edata, whole, central)]
-            cols.append([pooled_median(sel[0], metric), pooled_median(sel[1], metric, "weight"),
-                         pooled_median(sel[2], metric, "weight")])
-        rows[name] = [f"{a:.3f} ({t:.3f}/{u:.3f})" for a, t, u in zip(*cols)]
-    t1 = pd.DataFrame(rows, index=["Unweighted, all fixations", "Weighted, all FOV",
-                                   "Weighted, central FOV"]).T
-    print(f"\nTable 1 by training set, all (trained/untrained) [deg]\n{t1.to_string()}")
 
 
 # ---------------------------------------------------------------------------- figures
@@ -136,10 +118,10 @@ def fig8(df):
     """Optical (top) and visual (bottom) axis per frame around each grid target, both eyes;
     analysis-window frames without blinks, as the accuracy numbers use. Targets: filled and open
     circles are the two checkerboard halves, each corrected with the other's kappa; x is invalid."""
-    pid, rec, grid = FIG8.split("_", 1)[0], "_".join(FIG8.split("_")[1:3]), FIG8.split("_")[-1]
-    fig, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True, sharey=True)
-    for col, eye in enumerate(["left", "right"]):
-        d = pd.read_csv(data_path("1_accuracy", f"{FIG8}_{eye}.csv"))
+    pid, rec, grid = FIG8
+    fig, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True, sharey=True, layout="constrained")
+    for col, eye in enumerate(EYES):
+        d = pd.read_csv(data_path("1_accuracy", f"{pid}_{rec}_{grid}_{eye}.csv"))
         d = d[d.in_analysis_window & ~d.blink]
         fx = df[(df.participant == pid) & (df.recording == rec) & (df.grid == grid) & (df.eye == eye)]
         fx = fx.set_index("fixation")
@@ -154,7 +136,7 @@ def fig8(df):
             axs[0, col].plot(sx + f.optical_deviation_x_deg, sy + f.optical_deviation_y_deg, ".",
                              color="#ff4d00", alpha=0.3, markersize=2)
             axs[1, col].plot(sx + f.visual_deviation_x_deg.mean(), sy + f.visual_deviation_y_deg.mean(),
-                             "o", color="#1f77b4", markersize=2)
+                             "o", color="k", markersize=2)
             axs[1, col].plot(sx + f.visual_deviation_x_deg, sy + f.visual_deviation_y_deg, ".",
                              color="#2ca02c", alpha=0.3, markersize=2)
         kx, ky = fx.kappa_grid_x_deg.iloc[0], fx.kappa_grid_y_deg.iloc[0]
@@ -173,7 +155,6 @@ def fig8(df):
         ax.set_ylabel("Eccentricity vertical (deg)")
     for ax in axs[1]:
         ax.set_xlabel("Eccentricity horizontal (deg)")
-    fig.tight_layout()
     save_figure(fig, "fig08_grid")
 
 
@@ -192,8 +173,8 @@ def frame_central(ax, grid=None):
 def fig9(edata):
     """Fixation positions in the head frame, and fixation counts per cell; framed: the central
     window of the central-FOV analyses."""
-    fig, axs = plt.subplots(1, 2, figsize=(18, 7))
-    bx, by = cells(edata, X), cells(edata, Y)
+    fig, axs = plt.subplots(1, 2, figsize=(18, 7), layout="constrained")
+    bx, by = cell_of(edata[X], CELL), cell_of(edata[Y], CELL)
     for cx, cy in set(zip(bx, by)):
         axs[0].add_patch(Rectangle((cx - CELL / 2, cy - CELL / 2), CELL, CELL,
                                    edgecolor="gray", facecolor="none", linewidth=0.8))
@@ -210,15 +191,14 @@ def fig9(edata):
     for ax in axs:
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
-    fig.tight_layout()
     save_figure(fig, "fig09_fixation_distribution")
 
 
 def fig10(edata):
     """Median accuracy (top) and precision (bottom) per cell; framed: the central window."""
-    fig, axs = plt.subplots(2, 1, figsize=(11, 14))
+    fig, axs = plt.subplots(2, 1, figsize=(11, 14), layout="constrained")
     for ax, (metric, (name, vmax)) in zip(axs, METRICS.items()):
-        grid = pd.DataFrame({X: cells(edata, X), Y: cells(edata, Y), metric: edata[metric]}).pivot_table(
+        grid = pd.DataFrame({X: cell_of(edata[X], CELL), Y: cell_of(edata[Y], CELL), metric: edata[metric]}).pivot_table(
             index=Y, columns=X, values=metric, aggfunc="median")
         sns.heatmap(grid, annot=True, fmt=".2f", square=True, cmap="Blues", vmin=0, vmax=vmax, ax=ax)
         ax.invert_yaxis()
@@ -226,17 +206,15 @@ def fig10(edata):
         ax.set_title(name)
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
-    fig.tight_layout()
     save_figure(fig, "fig10_quality_by_cell")
 
 
 def fig_ue(ue, region, name):
     """U|E heatmaps for one region: accuracy left, precision right."""
-    fig, axs = plt.subplots(1, 2, figsize=(9.2, 4.2))
+    fig, axs = plt.subplots(1, 2, figsize=(9.2, 4.2), layout="constrained")
     for ax, (metric, (_, vmax)) in zip(axs, METRICS.items()):
         sns.heatmap(ue[metric][region], annot=True, fmt=".2f", square=True, cmap="Blues",
                     vmin=0, vmax=vmax, ax=ax)
-    fig.tight_layout()
     save_figure(fig, name)
 
 
@@ -250,7 +228,6 @@ def main():
 
     print_counts(df)
     ue = table1(edata, len(df))
-    table1_by_training(edata)
 
     fig7()
     fig8(df)

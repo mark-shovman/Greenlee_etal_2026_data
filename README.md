@@ -8,7 +8,7 @@ This repository contains the data and analysis code for the paper:
 
 The paper is currently in review, and the details will be updated here if and when it is published.
 
-The scripts in `Code/` reproduce the paper's Figures 7–18, Table 1, and the statistics quoted in
+The scripts in `Code/` reproduce the paper's Figures 7–17, Table 1, and the statistics quoted in
 the Results from the data in `Data/`.
 
 ## Repository Structure

@@ -11,20 +11,18 @@ import pandas as pd
 from matplotlib import ticker
 from matplotlib.patches import Rectangle
 from scipy import stats
-from statsmodels.formula.api import mixedlm, ols
+from statsmodels.formula.api import mixedlm
 
 from utils import (EYE_COLORS, EYES, IG, align_traces, angle_unit, blank, data_path, finish_timeline,
                    kappa_blocks, pooled_median, read_series, save_figure, timeline_figure, unit_mean)
 
 MS = 1 / 1000  # [s] per ms; windows are given in ms relative to the luminance change
-# Analysis windows (Methods): baseline, recovery
-PARTS = {"before": (-500, 0), "after": (1000, 1500)}
-# No-change control: the same shift between two windows before the change, against the baseline
-CONTROL_WINDOW = {"early": (-1300, -800)}  # starts 700 ms after the dark target appears
+# Analysis windows (Methods). The shift is baseline to recovery; the no-change control shift is
+# control to baseline, the control window starting 700 ms after the dark target appears.
+WINDOWS = {"control": (-1300, -800), "baseline": (-500, 0), "recovery": (1000, 1500)}
 # [ms] a saccade or blink here can move gaze between the windows of either shift (control start
 # to recovery end); events outside it cannot, and do not exclude the episode
-EVENT_SPAN = (CONTROL_WINDOW["early"][0], PARTS["after"][1])
-WINDOWS = (CONTROL_WINDOW["early"], PARTS["before"], PARTS["after"])  # drawn in Figs 13-14
+EVENT_SPAN = (WINDOWS["control"][0], WINDOWS["recovery"][1])
 SAMPLE_RATE = 120  # [Hz] eye cameras
 # Missing-data gate, as the grid's: in each window, the share of the expected samples with gaze and
 # with pupil must be at least this, in both eyes
@@ -58,13 +56,14 @@ def episodes(protocol):
 def draw_windows(ax, t0=0, unit=1):
     """The control, baseline and recovery windows as thin open boxes over 5-95% of the panel
     height; t0: the luminance change, unit: x-axis units per ms."""
-    for a, b in WINDOWS:
+    for a, b in WINDOWS.values():
         ax.add_patch(Rectangle((t0 + a * unit, 0.05), (b - a) * unit, 0.9, transform=ax.get_xaxis_transform(),
                                fill=False, edgecolor="k", linewidth=0.8, zorder=3))
 
 
-def window(r, part, parts=PARTS):
-    t0, t1 = parts[part]
+def window(r, span):
+    """The time slice [s] of span [ms] around episode r's luminance change."""
+    t0, t1 = span
     return slice(r.t_change + t0 * MS, r.t_change + t1 * MS)
 
 
@@ -72,32 +71,29 @@ def episode_metrics(ep, events, series):
     """Per episode and eye: median pupil per window, apparent gaze shift, the saccades and blinks
     overlapping the episode, and the lowest share of the expected samples with gaze or with pupil
     over the three windows (coverage)."""
-    windows = {**CONTROL_WINDOW, **PARTS}
+    angle = lambda u, v: angle_unit(u, v) if u is not None and v is not None else np.nan
     rows = []
     for _, r in ep.iterrows():
         for eye in EYES:
             d = series[(r.participant, eye)]
             m = {"participant": r.participant, "episode": r.episode, "eye": eye}
-            means = {}
-            for part in PARTS:
-                gd = d.loc[window(r, part), IG]
-                means[part] = unit_mean(gd) if len(gd) else None
-                m[f"pupil_{part}"] = d.pupil_diameter_mm.loc[window(r, part)].median()
-            m["shift"] = (angle_unit(means["before"], means["after"])
-                          if means["before"] is not None and means["after"] is not None else np.nan)
-            early = d.loc[window(r, "early", CONTROL_WINDOW), IG]
-            m["shift_control"] = (angle_unit(unit_mean(early), means["before"])
-                                  if len(early) and means["before"] is not None else np.nan)
-            m["pupil_early"] = d.pupil_diameter_mm.loc[window(r, "early", CONTROL_WINDOW)].median()
-            m["pupil_change"] = m["pupil_before"] - m["pupil_after"]  # constriction > 0
-            m["pupil_change_control"] = m["pupil_early"] - m["pupil_before"]
+            gaze, coverage = {}, []
+            for name, (t0, t1) in WINDOWS.items():
+                w = d.loc[window(r, (t0, t1))]
+                gaze[name] = unit_mean(w[IG]) if len(w) else None
+                m[f"pupil_{name}"] = w.pupil_diameter_mm.median()
+                expected = (t1 - t0) * MS * SAMPLE_RATE
+                coverage.append(w[["igX", "pupil_diameter_mm"]].notna().sum().min() / expected)
+            m["shift"] = angle(gaze["baseline"], gaze["recovery"])
+            m["shift_control"] = angle(gaze["control"], gaze["baseline"])
+            m["pupil_change"] = m["pupil_baseline"] - m["pupil_recovery"]  # constriction > 0
+            m["pupil_change_control"] = m["pupil_control"] - m["pupil_baseline"]
             ev = events[(events.participant == r.participant) & (events.eye == eye)]
-            span = window(r, "span", {"span": EVENT_SPAN})
+            span = window(r, EVENT_SPAN)
             overlap = (ev.t_end_sec > span.start) & (ev.t_start_sec < span.stop)
             m["n_saccades"] = int((overlap & (ev.event == "saccade")).sum())
             m["n_blinks"] = int((overlap & (ev.event == "blink")).sum())
-            m["coverage"] = min(d.loc[window(r, w, windows), col].notna().sum() / ((t1 - t0) * MS * SAMPLE_RATE)
-                                for w, (t0, t1) in windows.items() for col in ("igX", "pupil_diameter_mm"))
+            m["coverage"] = min(coverage)
             rows.append(m)
     return pd.DataFrame(rows)
 
@@ -125,11 +121,6 @@ def print_stats(clean):
     print(f"Constriction: {clean.pupil_change.mean():.3f} +/- {clean.pupil_change.std():.3f} mm; "
           f"apparent gaze shift: {clean['shift'].mean():.3f} +/- {clean['shift'].std():.3f} deg; "
           f"control shift: {clean.shift_control.mean():.3f} +/- {clean.shift_control.std():.3f} deg")
-    fit = ols("shift ~ pupil_change", data=clean).fit()
-    print(f"OLS shift ~ constriction: b = {fit.params.pupil_change:.3f} deg/mm, "
-          f"F({fit.df_model:.0f}, {fit.df_resid:.0f}) = {fit.fvalue:.2f}, p = {fit.f_pvalue:.2e}, "
-          f"R2 = {fit.rsquared:.3f}")
-    return clean
 
 
 def print_mixed_model(clean):
@@ -248,12 +239,13 @@ def fig13(ep, series):
     save_figure(fig, "fig13_example_participant")
 
 
-def fig14(ep, clean, series, t_pre=-EVENT_SPAN[0], t_post=EVENT_SPAN[1]):
+def fig14(ep, clean, series):
     """Pupil diameter, its change, and gaze shift around the change. Black: the mean over the
     clean episode-eyes, with its 95% band from the participant bootstrap; grey: each episode-eye
     (change and shift only). Change and shift are from the baseline window. Dark background
     shaded; the control, baseline and recovery windows as open boxes."""
-    b0, b1 = PARTS["before"]
+    b0, b1 = WINDOWS["baseline"]
+    t_pre, t_post = -EVENT_SPAN[0], EVENT_SPAN[1]  # [ms] the span shown, as the event check
     margin = 50  # [ms] the outer windows end at the data span
     fig, axs = plt.subplots(3, 1, sharex=True, figsize=(9, 6.5), layout="constrained")
     traces = {"diameter": [], "change": [], "shift": []}
@@ -347,7 +339,8 @@ def main():
     protocol, events, series = load()
     ep = episodes(protocol)
     metrics = episode_metrics(ep, events, series)
-    clean = print_stats(clean_episodes(metrics))
+    clean = clean_episodes(metrics)
+    print_stats(clean)
     fit = print_mixed_model(clean)
     print_control(clean)
     print_bootstrap(clean)
