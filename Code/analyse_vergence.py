@@ -1,7 +1,8 @@
 """Visual search task: paper Figures 16-17 and the numbers quoted with them. In the marker frame,
 where the symbols stand still: the repeated-measures ANOVA on the participants' mean vergence point
 distance in front of the marker per depth order, with Holm-corrected comparisons of adjacent
-depths. On distance from the head (Figs 16-17): the error of the vergence point against the symbol.
+depths. On distance from the head (Figs 16-17): the error of the vergence point against the symbol,
+and the within-participant SD of the vergence point's depth over repeated fixations on a symbol.
 
 Reads Data/3_vergence/. Run from anywhere:  python Code/analyse_vergence.py [--show]
 """
@@ -31,6 +32,7 @@ SYMBOLS = {
 FIG16 = ("p057", "vergence_3")  # the example run: participant, recording
 RIG_STYLE = {"A": dict(marker="o", color="0.55"), "B": dict(marker="^", color="0.15")}  # Fig 17
 FFZ = [f"ffz{x}" for x in "XYZ"]  # forward axis of the eye's front camera, a unit vector
+N_BOOT = 10_000  # participant resamples for the CI of the within-participant depth SD
 
 
 def load():
@@ -95,6 +97,7 @@ def stimulus_vergence(s, clean):
             fz[eye] = w[FFZ].mean().values
         s.loc[i, ["vp_x", "vp_y", "vp_z"]] = vergence_point(ic["left"], -gd["left"], ic["right"], -gd["right"])[0]
         s.loc[i, ["head_x", "head_y", "head_z"]] = (ic["left"] + ic["right"]) / 2
+        s.loc[i, "ipd_mm"] = np.linalg.norm(ic["left"] - ic["right"])
         f = fz["left"] + fz["right"]
         s.loc[i, ["fwd_x", "fwd_y", "fwd_z"]] = f / np.linalg.norm(f)
     symbols = np.array([SYMBOLS[r][k - 1] for r, k in zip(s.rig, s.order_from_participant)], float)
@@ -181,6 +184,58 @@ def print_error(v):
     print("Vergence minus symbol distance from the head [mm], median (IQR): "
           + "; ".join(f"{name} {g.median():.0f} ({g.quantile(.25):.0f} to {g.quantile(.75):.0f}), n = {len(g)}"
                       for name, g in [("all", e)] + [(f"rig {r}", e[v.rig == r]) for r in sorted(v.rig.unique())]))
+
+
+def depth_sd(v, col):
+    """Within-participant SD of col over repeated fixations on a symbol (cells: participant x depth
+    order; cells with one fixation dropped). pooled: sqrt(sum of squared residuals from the cell mean
+    / (fixations - cells)); robust: 1.4826 x MAD of the residuals rescaled by sqrt(n / (n - 1));
+    skew of the rescaled residuals, positive towards far; and per participant the sums of squares
+    and degrees of freedom, for the bootstrap."""
+    g = v.groupby(["participant", "order_from_participant"])[col]
+    n = g.transform("size")
+    keep = n > 1
+    r = (v[col] - g.transform("mean"))[keep]
+    scaled = r * np.sqrt(n[keep] / (n[keep] - 1))
+    far = -1 if col in ("marker_mm", "vergence_deg") else 1  # these grow towards the participant
+    pp = pd.DataFrame({"ss": r ** 2, "df": 1 - 1 / n[keep], "participant": v.participant[keep]}).groupby(
+        "participant")[["ss", "df"]].sum()
+    return dict(pooled=np.sqrt(pp.ss.sum() / pp.df.sum()), robust=stats.median_abs_deviation(scaled, scale="normal"),
+                skew=stats.skew(far * scaled), n_fix=len(r), n_cells=round((1 / n[keep]).sum()), per_participant=pp)
+
+
+def print_depth_sd(v):
+    """Within-participant SD of the vergence point's depth over repeated fixations on a symbol, per
+    rig and depth order: distance from the head and in front of the marker [mm], and vergence angle
+    [deg] from the distance from the head and the participant's median limbus-centre distance. The
+    rig A symbol nearest 700 mm from the head with a 95% CI over resampled participants; and the
+    between-participant SD of the participants' mean error, for contrast."""
+    v = v.assign(vergence_deg=np.degrees(2 * np.arctan(v.groupby("participant").ipd_mm.transform("median")
+                                                       / 2 / v.vergence_mm)))
+    single = (v.groupby(["participant", "order_from_participant"]).size() == 1).sum()
+    print(f"Within-participant SD of depth over repeated fixations on a symbol ({single} single-fixation cells "
+          f"dropped); pooled / robust, skew of the residuals (positive towards far):")
+    rows = []
+    for (rig, k), d in [((r, "all"), d) for r, d in v.groupby("rig")] + list(v.groupby(["rig", "order_from_participant"])):
+        h, m, a = (depth_sd(d, c) for c in ("vergence_mm", "marker_mm", "vergence_deg"))
+        rows.append({"rig": rig, "depth": k, "symbol from head": d.symbol_mm.median(),
+                     "head mm": f"{h['pooled']:.1f} / {h['robust']:.1f}", "marker mm": f"{m['pooled']:.1f} / {m['robust']:.1f}",
+                     "deg": f"{a['pooled']:.3f} / {a['robust']:.3f}", "skew head": round(h["skew"], 2),
+                     "fixations": h["n_fix"], "cells": h["n_cells"]})
+    print(pd.DataFrame(rows).round({"symbol from head": 0}).to_string(index=False))
+    a = v[v.rig == "A"]
+    k = (a.groupby("order_from_participant").symbol_mm.median() - 700).abs().idxmin()
+    rng = np.random.default_rng(1)
+    for col in ("vergence_mm", "marker_mm"):
+        r = depth_sd(a[a.order_from_participant == k], col)
+        pp = r["per_participant"].to_numpy()
+        i = rng.integers(0, len(pp), (N_BOOT, len(pp)))
+        lo, hi = np.percentile(np.sqrt(pp[i, 0].sum(1) / pp[i, 1].sum(1)), [2.5, 97.5])
+        print(f"Rig A depth {k}, {col}: pooled SD {r['pooled']:.1f} mm, 95% CI {lo:.1f} to {hi:.1f} "
+              f"({len(pp)} participants); robust {r['robust']:.1f} mm")
+    err = (v.vergence_mm - v.symbol_mm).groupby([v.rig, v.participant]).mean()
+    print("Between-participant SD of the mean error from the head: "
+          + "; ".join(f"rig {rig} {g.std():.1f} mm (n = {len(g)})" for rig, g in err.groupby(level=0)))
 
 
 # ---------------------------------------------------------------------------- figures
@@ -277,6 +332,7 @@ def main():
 
     print_anova(v)
     print_error(v)
+    print_depth_sd(v)
 
     fig16(s, raw, clean)
     fig17(v)
