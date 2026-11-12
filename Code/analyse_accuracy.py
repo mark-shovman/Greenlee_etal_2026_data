@@ -177,8 +177,21 @@ def fig8(df):
     save_figure(fig, "fig08_grid")
 
 
+def frame_central(ax, grid=None):
+    """A frame around the central window: in degrees, or on a heatmap of grid (cells are indices)."""
+    w, h = CENTRAL
+    if grid is None:
+        x0, y0, cw, ch = -w / 2, -h / 2, w, h
+    else:
+        first = lambda labels, edge: int(np.flatnonzero(np.isclose(np.asarray(labels, float), edge))[0])
+        x0, y0 = first(grid.columns, (CELL - w) / 2), first(grid.index, (CELL - h) / 2)
+        cw, ch = w / CELL, h / CELL
+    ax.add_patch(Rectangle((x0, y0), cw, ch, edgecolor="k", facecolor="none", linewidth=2.5, zorder=5))
+
+
 def fig9(edata):
-    """Fixation positions in the head frame, and fixation counts per cell."""
+    """Fixation positions in the head frame, and fixation counts per cell; framed: the central
+    window of the central-FOV analyses."""
     fig, axs = plt.subplots(1, 2, figsize=(18, 7))
     bx, by = cells(edata, X), cells(edata, Y)
     for cx, cy in set(zip(bx, by)):
@@ -192,6 +205,8 @@ def fig9(edata):
     counts = pd.DataFrame({X: bx, Y: by}).groupby([Y, X]).size().unstack(fill_value=np.nan)
     sns.heatmap(counts, annot=True, fmt=".0f", square=True, cmap="Blues", vmin=0, vmax=200, ax=axs[1])
     axs[1].invert_yaxis()
+    frame_central(axs[0])
+    frame_central(axs[1], counts)
     for ax in axs:
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
@@ -200,13 +215,14 @@ def fig9(edata):
 
 
 def fig10(edata):
-    """Median accuracy (top) and precision (bottom) per cell."""
+    """Median accuracy (top) and precision (bottom) per cell; framed: the central window."""
     fig, axs = plt.subplots(2, 1, figsize=(11, 14))
     for ax, (metric, (name, vmax)) in zip(axs, METRICS.items()):
         grid = pd.DataFrame({X: cells(edata, X), Y: cells(edata, Y), metric: edata[metric]}).pivot_table(
             index=Y, columns=X, values=metric, aggfunc="median")
         sns.heatmap(grid, annot=True, fmt=".2f", square=True, cmap="Blues", vmin=0, vmax=vmax, ax=ax)
         ax.invert_yaxis()
+        frame_central(ax, grid)
         ax.set_title(name)
         ax.set_xlabel("X (deg)")
         ax.set_ylabel("Y (deg)")
